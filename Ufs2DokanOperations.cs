@@ -1,0 +1,498 @@
+// Copyright (c) 2026, SvenGDK
+// Licensed under the BSD 2-Clause License. See LICENSE file for details.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using DokanNet;
+using FileAccess = DokanNet.FileAccess;
+
+namespace UFS2Tool
+{
+    /// <summary>
+    /// Implements the Dokan filesystem interface to mount a UFS1/UFS2 image
+    /// as a Windows drive letter. Modeled after FreeBSD mount_udf(8) / mount(8).
+    ///
+    /// This provides read-only access to the UFS filesystem contents through
+    /// a virtual Windows drive. The Dokan driver must be installed on the system.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    public class Ufs2DokanOperations : IDokanOperations, IDisposable
+    {
+        private readonly Ufs2Image _image;
+        private readonly object _lock = new();
+        private readonly bool _readOnly;
+
+        /// <summary>
+        /// Create a new Dokan filesystem backed by a UFS image.
+        /// </summary>
+        /// <param name="imagePath">Path to the UFS1/UFS2 filesystem image.</param>
+        /// <param name="readOnly">Mount as read-only.</param>
+        public Ufs2DokanOperations(string imagePath, bool readOnly)
+        {
+            _readOnly = readOnly;
+            _image = new Ufs2Image(imagePath, readOnly: readOnly);
+        }
+
+        public void Dispose()
+        {
+            _image.Dispose();
+        }
+
+        /// <summary>
+        /// Normalize a Windows path (backslashes) to a UFS path (forward slashes).
+        /// </summary>
+        private static string NormalizePath(string fileName)
+        {
+            return fileName.Replace('\\', '/');
+        }
+
+        /// <summary>
+        /// Resolve a Windows path to a UFS inode number.
+        /// Returns null if the path does not exist.
+        /// </summary>
+        private uint? TryResolvePath(string fileName)
+        {
+            try
+            {
+                string ufsPath = NormalizePath(fileName);
+                lock (_lock)
+                {
+                    return _image.ResolvePath(ufsPath);
+                }
+            }
+            catch (FileNotFoundException)
+            {
+                return null;
+            }
+            catch (InvalidOperationException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Convert a Unix timestamp (seconds since epoch) to a DateTime.
+        /// </summary>
+        private static DateTime UnixToDateTime(long unixTime)
+        {
+            if (unixTime <= 0)
+                return DateTime.MinValue;
+            try
+            {
+                return DateTimeOffset.FromUnixTimeSeconds(unixTime).LocalDateTime;
+            }
+            catch
+            {
+                return DateTime.MinValue;
+            }
+        }
+
+        public NtStatus CreateFile(string fileName, FileAccess access, FileShare share,
+            FileMode mode, FileOptions options, FileAttributes attributes, IDokanFileInfo info)
+        {
+            // For a read-only mount, deny any write/create operations
+            if (_readOnly)
+            {
+                if (mode == FileMode.CreateNew || mode == FileMode.Create ||
+                    mode == FileMode.OpenOrCreate || mode == FileMode.Append)
+                {
+                    return DokanResult.AccessDenied;
+                }
+
+                if (access.HasFlag(FileAccess.WriteData) || access.HasFlag(FileAccess.AppendData) ||
+                    access.HasFlag(FileAccess.Delete) || access.HasFlag(FileAccess.GenericWrite))
+                {
+                    return DokanResult.AccessDenied;
+                }
+            }
+
+            // Creating new files is not supported (no new inode allocation via Dokan)
+            if (mode == FileMode.CreateNew || mode == FileMode.Create)
+            {
+                return DokanResult.AccessDenied;
+            }
+
+            var inode = TryResolvePath(fileName);
+            if (inode == null)
+            {
+                if (mode == FileMode.OpenOrCreate)
+                    return DokanResult.AccessDenied;
+                return DokanResult.FileNotFound;
+            }
+
+            Ufs2Inode inodeData;
+            lock (_lock)
+            {
+                inodeData = _image.ReadInode(inode.Value);
+            }
+
+            if (inodeData.IsDirectory)
+            {
+                info.IsDirectory = true;
+            }
+
+            // Store inode number in context for later operations
+            info.Context = inode.Value;
+            return DokanResult.Success;
+        }
+
+        public void Cleanup(string fileName, IDokanFileInfo info)
+        {
+            // No cleanup needed for read-only filesystem
+        }
+
+        public void CloseFile(string fileName, IDokanFileInfo info)
+        {
+            info.Context = null;
+        }
+
+        public NtStatus ReadFile(string fileName, byte[] buffer, out int bytesRead,
+            long offset, IDokanFileInfo info)
+        {
+            bytesRead = 0;
+
+            var inode = TryResolvePath(fileName);
+            if (inode == null)
+                return DokanResult.FileNotFound;
+
+            byte[] fileData;
+            lock (_lock)
+            {
+                var inodeData = _image.ReadInode(inode.Value);
+                if (!inodeData.IsRegularFile && !inodeData.IsSymlink)
+                    return DokanResult.AccessDenied;
+
+                fileData = _image.ReadFile(inode.Value);
+            }
+
+            if (offset >= fileData.Length)
+            {
+                bytesRead = 0;
+                return DokanResult.Success;
+            }
+
+            int toRead = (int)Math.Min(buffer.Length, fileData.Length - offset);
+            Array.Copy(fileData, offset, buffer, 0, toRead);
+            bytesRead = toRead;
+            return DokanResult.Success;
+        }
+
+        public NtStatus WriteFile(string fileName, byte[] buffer, out int bytesWritten,
+            long offset, IDokanFileInfo info)
+        {
+            bytesWritten = 0;
+
+            if (_readOnly)
+                return DokanResult.AccessDenied;
+
+            var inode = TryResolvePath(fileName);
+            if (inode == null)
+                return DokanResult.FileNotFound;
+
+            try
+            {
+                lock (_lock)
+                {
+                    var inodeData = _image.ReadInode(inode.Value);
+                    if (!inodeData.IsRegularFile)
+                        return DokanResult.AccessDenied;
+
+                    // Read existing file data, apply the write, then replace
+                    byte[] existingData = _image.ReadFile(inode.Value);
+                    long newSize = Math.Max(existingData.Length, offset + buffer.Length);
+                    byte[] newData = new byte[newSize];
+                    Array.Copy(existingData, 0, newData, 0, existingData.Length);
+                    Array.Copy(buffer, 0, newData, offset, buffer.Length);
+
+                    string ufsPath = NormalizePath(fileName);
+                    _image.ReplaceFileContent(ufsPath, newData);
+                    bytesWritten = buffer.Length;
+                }
+                return DokanResult.Success;
+            }
+            catch (InvalidOperationException)
+            {
+                return DokanResult.AccessDenied;
+            }
+            catch (IOException)
+            {
+                return DokanResult.DiskFull;
+            }
+        }
+
+        public NtStatus FlushFileBuffers(string fileName, IDokanFileInfo info)
+        {
+            return DokanResult.Success;
+        }
+
+        public NtStatus GetFileInformation(string fileName, out FileInformation fileInfo,
+            IDokanFileInfo info)
+        {
+            fileInfo = new FileInformation();
+
+            var inode = TryResolvePath(fileName);
+            if (inode == null)
+                return DokanResult.FileNotFound;
+
+            Ufs2Inode inodeData;
+            lock (_lock)
+            {
+                inodeData = _image.ReadInode(inode.Value);
+            }
+
+            fileInfo.FileName = Path.GetFileName(fileName.TrimEnd('\\'));
+            if (string.IsNullOrEmpty(fileInfo.FileName))
+                fileInfo.FileName = "\\";
+
+            if (inodeData.IsDirectory)
+            {
+                fileInfo.Attributes = FileAttributes.Directory;
+                if (_readOnly) fileInfo.Attributes |= FileAttributes.ReadOnly;
+                fileInfo.Length = 0;
+            }
+            else
+            {
+                fileInfo.Attributes = _readOnly ? FileAttributes.ReadOnly : FileAttributes.Normal;
+                fileInfo.Length = inodeData.Size;
+            }
+
+            fileInfo.CreationTime = UnixToDateTime(inodeData.CreateTime);
+            fileInfo.LastAccessTime = UnixToDateTime(inodeData.AccessTime);
+            fileInfo.LastWriteTime = UnixToDateTime(inodeData.ModTime);
+
+            return DokanResult.Success;
+        }
+
+        public NtStatus FindFiles(string fileName, out IList<FileInformation> files,
+            IDokanFileInfo info)
+        {
+            files = [];
+
+            var inode = TryResolvePath(fileName);
+            if (inode == null)
+                return DokanResult.PathNotFound;
+
+            List<Ufs2DirectoryEntry> entries;
+            lock (_lock)
+            {
+                var inodeData = _image.ReadInode(inode.Value);
+                if (!inodeData.IsDirectory)
+                    return DokanResult.NotADirectory;
+
+                entries = _image.ListDirectory(inode.Value);
+            }
+
+            foreach (var entry in entries)
+            {
+                // Skip . and .. — Windows Explorer handles these
+                if (entry.Name == "." || entry.Name == "..")
+                    continue;
+
+                var fi = new FileInformation
+                {
+                    FileName = entry.Name
+                };
+
+                if (entry.FileType == Ufs2Constants.DtDir)
+                {
+                    fi.Attributes = FileAttributes.Directory;
+                    if (_readOnly) fi.Attributes |= FileAttributes.ReadOnly;
+                    fi.Length = 0;
+                }
+                else if (entry.FileType == Ufs2Constants.DtReg)
+                {
+                    fi.Attributes = _readOnly ? FileAttributes.ReadOnly : FileAttributes.Normal;
+
+                    // Read size from the inode
+                    lock (_lock)
+                    {
+                        var entryInode = _image.ReadInode(entry.Inode);
+                        fi.Length = entryInode.Size;
+                        fi.CreationTime = UnixToDateTime(entryInode.CreateTime);
+                        fi.LastAccessTime = UnixToDateTime(entryInode.AccessTime);
+                        fi.LastWriteTime = UnixToDateTime(entryInode.ModTime);
+                    }
+                }
+                else if (entry.FileType == Ufs2Constants.DtLnk)
+                {
+                    fi.Attributes = _readOnly ? FileAttributes.ReadOnly : FileAttributes.Normal;
+
+                    lock (_lock)
+                    {
+                        var entryInode = _image.ReadInode(entry.Inode);
+                        fi.Length = entryInode.Size;
+                        fi.CreationTime = UnixToDateTime(entryInode.CreateTime);
+                        fi.LastAccessTime = UnixToDateTime(entryInode.AccessTime);
+                        fi.LastWriteTime = UnixToDateTime(entryInode.ModTime);
+                    }
+                }
+                else
+                {
+                    // Other types (fifo, char, block, socket) — show as system files
+                    fi.Attributes = FileAttributes.ReadOnly | FileAttributes.System;
+                }
+
+                files.Add(fi);
+            }
+
+            return DokanResult.Success;
+        }
+
+        public NtStatus FindFilesWithPattern(string fileName, string searchPattern,
+            out IList<FileInformation> files, IDokanFileInfo info)
+        {
+            files = [];
+            // Delegate to FindFiles — Dokan will filter by pattern
+            return DokanResult.NotImplemented;
+        }
+
+        public NtStatus SetFileAttributes(string fileName, FileAttributes attributes,
+            IDokanFileInfo info)
+        {
+            return DokanResult.AccessDenied;
+        }
+
+        public NtStatus SetFileTime(string fileName, DateTime? creationTime,
+            DateTime? lastAccessTime, DateTime? lastWriteTime, IDokanFileInfo info)
+        {
+            return DokanResult.AccessDenied;
+        }
+
+        public NtStatus DeleteFile(string fileName, IDokanFileInfo info)
+        {
+            return DokanResult.AccessDenied;
+        }
+
+        public NtStatus DeleteDirectory(string fileName, IDokanFileInfo info)
+        {
+            return DokanResult.AccessDenied;
+        }
+
+        public NtStatus MoveFile(string oldName, string newName, bool replace,
+            IDokanFileInfo info)
+        {
+            return DokanResult.AccessDenied;
+        }
+
+        public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info)
+        {
+            if (_readOnly)
+                return DokanResult.AccessDenied;
+
+            var inode = TryResolvePath(fileName);
+            if (inode == null)
+                return DokanResult.FileNotFound;
+
+            try
+            {
+                lock (_lock)
+                {
+                    string ufsPath = NormalizePath(fileName);
+                    byte[] existingData = _image.ReadFile(inode.Value);
+                    byte[] newData = new byte[length];
+                    Array.Copy(existingData, 0, newData, 0, Math.Min(existingData.Length, length));
+                    _image.ReplaceFileContent(ufsPath, newData);
+                }
+                return DokanResult.Success;
+            }
+            catch (InvalidOperationException)
+            {
+                return DokanResult.AccessDenied;
+            }
+            catch (IOException)
+            {
+                return DokanResult.DiskFull;
+            }
+        }
+
+        public NtStatus SetAllocationSize(string fileName, long length, IDokanFileInfo info)
+        {
+            if (_readOnly)
+                return DokanResult.AccessDenied;
+            // Allocation size changes are handled via SetEndOfFile
+            return DokanResult.Success;
+        }
+
+        public NtStatus LockFile(string fileName, long offset, long length, IDokanFileInfo info)
+        {
+            return DokanResult.Success;
+        }
+
+        public NtStatus UnlockFile(string fileName, long offset, long length, IDokanFileInfo info)
+        {
+            return DokanResult.Success;
+        }
+
+        public NtStatus GetDiskFreeSpace(out long freeBytesAvailable,
+            out long totalNumberOfBytes, out long totalNumberOfFreeBytes, IDokanFileInfo info)
+        {
+            var sb = _image.Superblock;
+
+            long totalFrags = sb.TotalBlocks;
+            long freeFrags = sb.FreeBlocks;
+            int fragSize = sb.FSize;
+
+            totalNumberOfBytes = totalFrags * fragSize;
+            totalNumberOfFreeBytes = freeFrags * fragSize;
+            freeBytesAvailable = _readOnly ? 0 : totalNumberOfFreeBytes;
+
+            return DokanResult.Success;
+        }
+
+        public NtStatus GetVolumeInformation(out string volumeLabel,
+            out FileSystemFeatures features, out string fileSystemName,
+            out uint maximumComponentLength, IDokanFileInfo info)
+        {
+            string label = _image.Superblock.VolumeName?.Trim('\0') ?? "";
+            volumeLabel = string.IsNullOrWhiteSpace(label)
+                ? (_image.Superblock.IsUfs1 ? "UFS1" : "UFS2")
+                : label;
+
+            features = FileSystemFeatures.CasePreservedNames
+                     | FileSystemFeatures.CaseSensitiveSearch
+                     | FileSystemFeatures.UnicodeOnDisk;
+
+            if (_readOnly)
+                features |= FileSystemFeatures.ReadOnlyVolume;
+
+            fileSystemName = _image.Superblock.IsUfs1 ? "UFS1" : "UFS2";
+            maximumComponentLength = Ufs2Constants.MaxNameLen;
+
+            return DokanResult.Success;
+        }
+
+        public NtStatus GetFileSecurity(string fileName, out FileSystemSecurity? security,
+            AccessControlSections sections, IDokanFileInfo info)
+        {
+            security = null;
+            return DokanResult.NotImplemented;
+        }
+
+        public NtStatus SetFileSecurity(string fileName, FileSystemSecurity security,
+            AccessControlSections sections, IDokanFileInfo info)
+        {
+            return DokanResult.AccessDenied;
+        }
+
+        public NtStatus Mounted(string mountPoint, IDokanFileInfo info)
+        {
+            return DokanResult.Success;
+        }
+
+        public NtStatus Unmounted(IDokanFileInfo info)
+        {
+            return DokanResult.Success;
+        }
+
+        public NtStatus FindStreams(string fileName, out IList<FileInformation> streams,
+            IDokanFileInfo info)
+        {
+            streams = Array.Empty<FileInformation>();
+            return DokanResult.NotImplemented;
+        }
+    }
+}

@@ -4,7 +4,7 @@ This document summarizes all features implemented in UFS2-Tool.
 
 ## Overview
 
-UFS2-Tool is a complete implementation of FreeBSD's `newfs(8)` and `makefs(8)` commands written in C#, targeting .NET 8.0. It creates and manages UFS1/UFS2 filesystems on Windows, supporting both image files and raw disk devices. Filesystem images created by this tool are compatible with FreeBSD's `mount` and `fsck_ffs`.
+UFS2-Tool is a complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `growfs(8)`, and `fsck_ufs(8)` commands written in C#, targeting .NET 8.0. It creates, manages, and checks UFS1/UFS2 filesystems on Windows, supporting both image files and raw disk devices. Filesystem images created by this tool are compatible with FreeBSD's `mount` and `fsck_ffs`.
 
 ## Project Structure
 
@@ -22,6 +22,7 @@ UFS2-Tool is a complete implementation of FreeBSD's `newfs(8)` and `makefs(8)` c
 | `Ufs2DirectoryEntry.cs` | Directory entry structure |
 | `Ufs2Constants.cs` | UFS filesystem constants |
 | `DriveIO.cs` | Windows raw device I/O (Win32 P/Invoke) |
+| `Ufs2DokanOperations.cs` | Dokan virtual filesystem for mounting UFS images |
 | `AlignedStream.cs` | Sector-aligned buffered write wrapper |
 | `app.manifest` | Windows application manifest (admin elevation) |
 
@@ -105,17 +106,206 @@ FreeBSD `makefs(8)` compatible interface for creating filesystem images from dir
 
 **Size suffixes:** `b` (×512), `k` (×1024), `m` (×1M), `g` (×1G), `t` (×1T), `w` (×4), and products with `x` (e.g., `512x1024`).
 
+### `tunefs` — Tune existing filesystem parameters
+
+Full implementation of FreeBSD's `tunefs(8)` command for modifying layout parameters on an existing UFS1/UFS2 filesystem image. Reads the superblock, applies requested changes, and writes it back.
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-A` | Write the updated superblock to all backup superblock locations |
+| `-a enable\|disable` | Enable or disable POSIX.1e ACL support |
+| `-e maxbpg` | Set maximum blocks per file in a cylinder group |
+| `-f avgfilesize` | Set expected average file size |
+| `-J enable\|disable` | Enable or disable gjournal |
+| `-j enable\|disable` | Enable or disable soft updates journaling (enabling also enables soft updates) |
+| `-k metaspace` | Set space (in frags) to hold for metadata blocks |
+| `-L volname` | Set volume label (alphanumerics, dashes, underscores; max 31 chars) |
+| `-l enable\|disable` | Enable or disable multilabel MAC support |
+| `-m minfree` | Set minimum percentage of free space (0–99) |
+| `-N enable\|disable` | Enable or disable NFSv4 ACL support |
+| `-n enable\|disable` | Enable or disable soft updates |
+| `-o space\|time` | Set optimization preference |
+| `-p` | Print current tuneable values and exit (read-only) |
+| `-s avgfpdir` | Set expected number of files per directory |
+| `-t enable\|disable` | Enable or disable TRIM/DISCARD support |
+
+**Behavior notes:**
+
+- POSIX.1e ACLs (`-a`) and NFSv4 ACLs (`-N`) are mutually exclusive, matching FreeBSD behavior.
+- Enabling soft updates journaling (`-j enable`) also sets the soft updates flag.
+- Optimization warnings are issued when minfree and optimization preference are mismatched (minfree ≥ 8% with space optimization, or minfree < 8% with time optimization).
+- Volume label validation matches FreeBSD: only alphanumerics, dashes, and underscores allowed.
+- Metadata space (`-k`) is rounded down to a block boundary and capped at half the cylinder group size.
+
 ### `info` — Show filesystem information
 
 Reads and displays detailed filesystem metadata from an existing UFS1/UFS2 image, including format, block/fragment sizes, cylinder groups, free resources, volume name, flags, and optimization settings.
+
+### `growfs` — Expand an existing filesystem
+
+Full implementation of FreeBSD's `growfs(8)` command for expanding UFS1/UFS2 filesystem images. Grows an existing filesystem to use additional space by adding new cylinder groups and extending the last cylinder group.
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-N` | Test mode — print parameters without modifying the filesystem |
+| `-y` | Assume yes to all prompts |
+| `-s size` | New filesystem size. Without suffix: 512-byte sectors. Suffixes: `b` (bytes), `k` (KB), `m` (MB), `g` (GB), `t` (TB). Defaults to image file size |
+
+**Implementation details:**
+
+- Extends the last (joining) cylinder group if it was not previously full.
+- Initializes new cylinder groups with proper CG headers, fragment/inode bitmaps, and cluster summaries.
+- Writes inode tables for new CGs with randomized `di_gen` values per FreeBSD convention.
+- Relocates the CG summary area (`fs_csaddr`) to a new cylinder group when the summary grows.
+- Updates all superblock fields (`fs_size`, `fs_dsize`, `fs_ncg`, `fs_cssize`, free counts).
+- Writes backup superblocks to all cylinder groups.
+- Supports both UFS1 and UFS2 filesystem formats.
+- Dry-run mode (`-N`) prints parameters without modifying the filesystem.
 
 ### `ls` — List directory contents
 
 Lists directory entries from a UFS1/UFS2 filesystem image, with optional path argument to list subdirectories. Supports traversal through direct and indirect block pointers.
 
+### `fsck_ufs` — Filesystem consistency check
+
+Full implementation of FreeBSD's `fsck_ffs(8)`/`fsck_ufs(8)` command for checking UFS1/UFS2 filesystem image consistency. Also available as `fsck_ffs`. Performs the five standard phases of filesystem checking as defined by FreeBSD.
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-b block` | Use the specified block number as an alternate superblock |
+| `-d` | Enable debugging messages |
+| `-f` | Force check even if filesystem is marked clean |
+| `-n` | Assume no to all questions; read-only mode |
+| `-p` | Preen mode: only fix safe inconsistencies |
+| `-y` | Assume yes to all questions |
+
+**Five-phase checking:**
+
+1. **Phase 1 — Check Blocks and Sizes**: Reads all inodes and validates direct/indirect block pointers are within range, detects duplicate block claims, verifies directory sizes are multiples of DIRBLKSIZ, and identifies allocated inodes with zero link counts.
+2. **Phase 2 — Check Pathnames**: Walks the directory tree from root, validates that directory entries point to allocated inodes with valid inode numbers, verifies `.` and `..` entries are present and correct.
+3. **Phase 3 — Check Connectivity**: Identifies orphaned inodes (allocated but unreferenced from any directory). In preen mode, reports candidates for reconnection to `lost+found`.
+4. **Phase 4 — Check Reference Counts**: Compares observed link counts (from directory traversal) against stored link counts in each inode.
+5. **Phase 5 — Check Cylinder Groups**: Validates CG magic numbers and indices, verifies inode bitmap consistency, and checks that superblock free block/inode/directory counts match CG totals.
+
+**Implementation details:**
+
+- Supports both UFS1 and UFS2 filesystem formats.
+- Checks superblock validity (magic number, block/fragment sizes, CG parameters).
+- Uses sparse block ownership tracking for memory efficiency on large images.
+- Combined flag parsing supports FreeBSD-style combined flags (e.g., `-pf`, `-nyd`).
+- Clean filesystem detection: skips checks when `FS_UNCLEAN` and `FS_NEEDSFSCK` flags are not set (unless `-f` is specified).
+- Exit codes follow FreeBSD convention: 0 on success, 8 on general error.
+
+### `extract` — Extract files from a filesystem image
+
+Extracts files from a UFS1/UFS2 filesystem image to the local filesystem.
+
+### `replace` — Replace files in a filesystem image
+
+Replaces a file or directory in a UFS1/UFS2 filesystem image with content from the local filesystem. If the target is a file, its content is replaced with the source file. If the target is a directory, matching files in the source directory replace their counterparts in the target directory recursively.
+
+**Synopsis:**
+```
+ufs2tool replace <image-path> <fs-path> <source-path>
+```
+
+**Features:**
+- Replace a single file with same-size, smaller, or larger content
+- Replace matching files in a directory tree recursively
+- Supports both UFS1 and UFS2 filesystem formats
+- Allocates additional blocks from free space when the replacement file is larger
+- Updates inode metadata (size, timestamps, block counts)
+- Validates filesystem consistency after replacement
+
+### `add` — Add files to a filesystem image
+
+Adds a file or directory to a UFS1/UFS2 filesystem image from the local filesystem. If the source is a file, it is added at the specified path. If the source is a directory, it is created at the specified path and its contents are added recursively.
+
+**Synopsis:**
+```
+ufs2tool add <image-path> <fs-path> <source-path>
+```
+
+**Features:**
+- Add a single file to any directory in the filesystem
+- Add a directory with all contents recursively
+- Inode allocation from cylinder group free inode bitmap
+- Block allocation and data writing with direct, single-indirect, and double-indirect block support
+- Directory entry creation with proper DIRBLKSIZ boundary handling and slack space reuse
+- Supports both UFS1 and UFS2 filesystem formats
+- Updates all filesystem metadata (inode bitmaps, fragment bitmaps, CG counters, superblock)
+- Parent directory link count updates for subdirectory creation
+
+### `delete` — Delete files from a filesystem image
+
+Deletes a file or directory from a UFS1/UFS2 filesystem image. If the target is a directory, all contents are deleted recursively before the directory itself is removed.
+
+**Synopsis:**
+```
+ufs2tool delete <image-path> <fs-path>
+```
+
+**Features:**
+- Delete a single file, freeing all data blocks and inode
+- Delete a directory and all contents recursively
+- Block deallocation with fragment bitmap and cluster bitmap updates
+- Inode deallocation with inode bitmap updates
+- Directory entry removal with proper record length merging
+- Supports both UFS1 and UFS2 filesystem formats
+- Updates all filesystem metadata (CG counters, superblock free counts)
+- Parent directory link count updates for subdirectory deletion
+
 ### `devinfo` — Show device information
 
 Displays Windows device information including total size and sector size for physical drives and volumes. Requires Administrator privileges.
+
+### `mount_udf` — Mount UFS image as Windows drive
+
+Mounts a UFS1/UFS2 filesystem image as a Windows drive letter using the Dokan user-mode filesystem driver. Modeled after FreeBSD's `mount_udf(8)` and `mount(8)` commands.
+
+**Synopsis:**
+```
+ufs2tool mount_udf [-o options] [-v] <image-path> <drive-letter>
+```
+
+**Features:**
+- Mounts UFS1 and UFS2 images as a Windows drive letter (e.g., `X:`)
+- Browse files and directories through Windows Explorer
+- Read file contents and copy files to the local filesystem
+- Supports both UFS1 and UFS2 filesystem formats
+- Reports volume label, filesystem type, and free space to Windows
+- Thread-safe: handles concurrent file access from Windows
+- Read-write support: modify existing files on the mounted filesystem
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-o ro` | Mount read-only (default) |
+| `-o rw` | Mount read-write (modify existing files) |
+| `-v` | Verbose output with Dokan debug logging |
+
+**Prerequisites:**
+- Requires the [Dokan driver](https://github.com/dokan-dev/dokany/releases) to be installed on Windows
+- Requires Administrator privileges
+
+**Limitations:**
+- Creating new files or deleting files is not supported through the mount interface
+- Symlinks are presented as regular files containing the link target
+
+### `umount_udf` — Unmount a UFS drive
+
+Unmounts a previously mounted UFS filesystem drive. Alternatively, pressing Ctrl+C in the `mount_udf` terminal also cleanly unmounts.
+
+**Synopsis:**
+```
+ufs2tool umount_udf <drive-letter>
+```
 
 ## Core Library (`UFS2Tool`)
 
@@ -135,13 +325,18 @@ Displays Windows device information including total size and sector size for phy
 - Support for writing to both image files and raw Windows devices
 - Dry run mode (`-N`) for parameter display without writing
 
-### Filesystem Reading (`Ufs2Image`)
+### Filesystem Reading and Writing (`Ufs2Image`)
 
 - Superblock parsing and validation for both UFS1 and UFS2 formats
 - Inode reading by inode number with automatic cylinder group resolution
-- UFS1-to-UFS2 inode conversion for unified API access
+- Inode writing back to disk for both UFS1 and UFS2 formats
+- UFS1-to-UFS2 inode conversion (and reverse) for unified API access
 - Directory entry listing through direct and indirect blocks
 - File content reading through direct, single-indirect, double-indirect, and triple-indirect blocks
+- File content replacement with in-place block overwriting
+- Block allocation from cylinder group free space for larger replacement files
+- File and directory addition with inode allocation, block allocation, and directory entry creation
+- File and directory deletion with recursive content removal, block deallocation, and inode freeing
 - Filesystem summary information display
 
 ### Superblock (`Ufs2Superblock`)
@@ -187,6 +382,17 @@ Displays Windows device information including total size and sector size for phy
 - Automatic zero-padding for writes not aligned to sector boundaries
 - Position alignment enforcement
 
+### Dokan Virtual Filesystem (`Ufs2DokanOperations`)
+
+- Implements `IDokanOperations` interface to present UFS image as a Windows drive
+- Thread-safe access to `Ufs2Image` via locking
+- Maps UFS directory entries to Windows `FileInformation` structures
+- Converts Unix timestamps to Windows `DateTime`
+- Reports filesystem metadata (volume label, free space, filesystem type)
+- Handles path normalization between Windows backslash and UFS forward slash conventions
+- Read-write support: modify existing file contents through standard Windows file operations
+- File attributes reflect mount mode (read-only vs. read-write)
+
 ## Test Suite
 
 The project includes a comprehensive test suite (`UFS2Tool.Tests`) with the following test classes:
@@ -198,3 +404,9 @@ The project includes a comprehensive test suite (`UFS2Tool.Tests`) with the foll
 | `CylinderGroupTests` | Validates cylinder group layout, bitmaps, and metadata |
 | `BitmapAndLinkCountTests` | Tests block allocation bitmaps and inode link count tracking |
 | `LargeComplexTreeTests` | Validates large file and deep directory tree creation with indirect blocks |
+| `TuneFsTests` | Tests tunefs command: flag toggling, value changes, mutual exclusions, backup superblock writes, and print mode |
+| `GrowFsTests` | Tests growfs command: filesystem expansion, new CG creation, and CG summary relocation |
+| `ExtractTests` | Tests file extraction from UFS1/UFS2 filesystem images |
+| `ReplaceTests` | Tests file and directory replacement in UFS1/UFS2 filesystem images |
+| `AddDeleteTests` | Tests adding and deleting files and directories in UFS1/UFS2 filesystem images, including recursive operations, binary content preservation, and fsck validation |
+| `FsckUfsTests` | Tests fsck_ufs command: clean filesystem detection, CG magic/count validation, superblock count mismatches, populated filesystem checking, multi-CG images, and post-growfs/tunefs consistency |
