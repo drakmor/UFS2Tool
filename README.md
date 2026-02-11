@@ -24,7 +24,7 @@ A complete implementation of FreeBSD's `newfs(8)` command for creating UFS1 and 
   - [ls](#ls--list-directory-contents)
   - [devinfo](#devinfo--show-device-information)
 - [Examples](#-examples)
-- [Quick Start](#-quick-start)
+- [PS5 Quick Start](#-ps5-quick-start)
 - [Building](#-building)
 - [Testing](#-testing)
 - [Implementation Details](#-implementation-details)
@@ -221,12 +221,18 @@ ufs2tool ls myimage.img
 
 ---
 
-## Quick Start
+## 📄 PS5 Quick Start
 
-Use this command to quickly create a UFS2 image with FreeBSD-compatible FFS options:
+Use this command to quickly create a UFS2 image compatible to be mounted on the PS5 with ShadowMount:
 
 ```powershell
-UFS2Tool.exe makefs -S 4096 -t ffs -o version=2,minfree=0,softupdates=0,optimization=space <PPAxxxx.ffpkg> <folder>
+UFS2Tool.exe newfs -D <folder> <PPSAxxxx.ffpkg>
+```
+
+Alternatively you can use this command to quickly create a UFS2 image with FreeBSD-compatible FFS options which mounted on the PS5 with ShadowMount:
+
+```powershell
+UFS2Tool.exe makefs -S 4096 -t ffs -o version=2,minfree=0,softupdates=0,optimization=space <PPSAxxxx.ffpkg> <folder>
 ```
 
 ---
