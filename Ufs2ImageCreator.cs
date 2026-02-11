@@ -1586,7 +1586,7 @@ namespace UFS2Tool
         ///      CG summary area, minfree%) and derive total image size iteratively
         ///   4. Enforce minsize/maxsize constraints
         ///   5. Round up to block boundary (and optional roundup)
-        ///   6. Auto-calculate density if not set
+        ///   6. Auto-calculate density and maxbpcg if not set
         /// </summary>
         public long MakeFsImage(string imagePath, string directoryPath,
             long imageSize = 0, long freeblocks = 0, int freeblockpc = 0,
@@ -1599,6 +1599,7 @@ namespace UFS2Tool
 
             // Save original state for restoration after MakeFsImage completes
             int origBytesPerInode = BytesPerInode;
+            int origBlocksPerCylGroup = BlocksPerCylGroup;
 
             try
             {
@@ -1672,9 +1673,28 @@ namespace UFS2Tool
 
             int inodeblks = ((ipg + inodesPerBlock - 1) / inodesPerBlock) * fragsPerBlock;
             int dblkno = iblkno + inodeblks;
-            int fragsPerGroup = BlocksPerCylGroup > 0
-                ? BlocksPerCylGroup * fragsPerBlock
-                : ipg * fragsPerBlock;
+            bool autoMaxBpcg = false;
+            if (BlocksPerCylGroup <= 0)
+            {
+                // Auto maxbpcg: choose the largest blocks/group that still provides
+                // enough cylinder groups to fit all required inodes.
+                int requiredCgForInodes = 1;
+                if (totalInodes > 0 && ipg > 0)
+                    requiredCgForInodes = Math.Max(1, (int)((totalInodes + ipg - 1) / ipg));
+
+                long minSizeForCalc = Math.Max(totalSize, (long)BlockSize * 16);
+                long totalBlocksEstimate = Math.Max(1, (minSizeForCalc + BlockSize - 1) / BlockSize);
+                long autoBpcg = (totalBlocksEstimate + requiredCgForInodes - 1) / requiredCgForInodes;
+
+                long maxBpcgByInt = Math.Max(1, int.MaxValue / fragsPerBlock);
+                if (autoBpcg > maxBpcgByInt)
+                    autoBpcg = maxBpcgByInt;
+
+                BlocksPerCylGroup = (int)Math.Max(1, autoBpcg);
+                autoMaxBpcg = true;
+            }
+
+            int fragsPerGroup = BlocksPerCylGroup * fragsPerBlock;
 
             // dataFragsPerCg: usable data fragments per CG (metadata consumes dblkno frags)
             int dataFragsPerCg = fragsPerGroup - dblkno;
@@ -1725,8 +1745,12 @@ namespace UFS2Tool
 
             // ── Step 7: Auto-calculate density if not explicitly set ──
             // FreeBSD: density = size / inodes + 1 (when -o density not specified)
+            bool autoDensity = false;
             if (BytesPerInode <= 0 && totalInodes > 0)
+            {
                 BytesPerInode = (int)Math.Min(totalSize / totalInodes + 1, int.MaxValue);
+                autoDensity = true;
+            }
 
             // ── Step 8: Check maximum size ──
             if (maximumSize > 0 && totalSize > maximumSize)
@@ -1739,6 +1763,10 @@ namespace UFS2Tool
             Console.WriteLine($"  Input directory: {directoryPath}");
             Console.WriteLine($"  Directory size:  {dirSize:N0} bytes ({dirSize / (1024.0 * 1024):F2} MB)");
             Console.WriteLine($"  Image size:      {totalSize:N0} bytes ({totalSize / (1024 * 1024)} MB)");
+            if (autoDensity)
+                Console.WriteLine($"  Auto density:    {BytesPerInode:N0} bytes/inode");
+            if (autoMaxBpcg)
+                Console.WriteLine($"  Auto maxbpcg:    {BlocksPerCylGroup:N0} blocks/CG");
             Console.WriteLine();
 
             CreateImage(imagePath, totalSize);
@@ -1756,6 +1784,7 @@ namespace UFS2Tool
             {
                 // Restore original state in case the creator instance is reused
                 BytesPerInode = origBytesPerInode;
+                BlocksPerCylGroup = origBlocksPerCylGroup;
             }
         }
 
@@ -1818,6 +1847,53 @@ namespace UFS2Tool
             // in the last allocated block of each file. These should be marked free in the bitmap.
             var tailFreeFrags = new HashSet<long>();
 
+            var (totalFiles, totalBytes) = CountFilesAndBytesRecursive(directoryPath);
+            long copiedBytes = 0;
+            int displayedCompletedFiles = 0;
+            int lastProgressPercent = -1;
+            void ReportCopyProgress(int completedFiles, long bytesDelta, bool force = false)
+            {
+                if (bytesDelta > 0)
+                {
+                    copiedBytes += bytesDelta;
+                    if (copiedBytes > totalBytes)
+                        copiedBytes = totalBytes;
+                }
+
+                if (completedFiles > displayedCompletedFiles)
+                    displayedCompletedFiles = completedFiles;
+
+                if (totalFiles <= 0 && totalBytes <= 0)
+                    return;
+
+                int percent;
+                if (totalBytes > 0)
+                {
+                    percent = (int)(copiedBytes * 100 / totalBytes);
+                }
+                else
+                {
+                    percent = (int)((long)displayedCompletedFiles * 100 / totalFiles);
+                }
+
+                if (percent >= 100 && displayedCompletedFiles < totalFiles)
+                    percent = 99;
+
+                if (percent > 100)
+                    percent = 100;
+
+                if (!force && percent == lastProgressPercent)
+                    return;
+
+                Console.Write(
+                    $"\r  Adding files to image... {percent,3}% " +
+                    $"({displayedCompletedFiles:N0}/{totalFiles:N0} files, {FormatBytes(copiedBytes)}/{FormatBytes(totalBytes)})");
+                lastProgressPercent = percent;
+            }
+
+            if (totalFiles > 0 || totalBytes > 0)
+                ReportCopyProgress(0, 0, force: true);
+
             // Recursively process directory contents
             ProcessDirectoryContents(fs, writer, reader, directoryPath,
                 Ufs2Constants.RootInode, sb, inodeTableOffset, inodeSize,
@@ -1825,7 +1901,8 @@ namespace UFS2Tool
                 ref nextInode, ref nextDataFragInCg, ref currentCg,
                 ref dirCount, ref filesWritten, rootEntries, timestamp: now,
                 dirsPerCg: dirsPerCg, perCgHighWater: perCgHighWater,
-                totalFrags: totalFrags, tailFreeFrags: tailFreeFrags);
+                totalFrags: totalFrags, tailFreeFrags: tailFreeFrags,
+                onCopyProgress: (completedFiles, bytesDelta) => ReportCopyProgress(completedFiles, bytesDelta));
 
             // Rewrite root directory block(s) to include the new entries
             long rootInodeTablePos = inodeTableOffset + (long)Ufs2Constants.RootInode * inodeSize;
@@ -1875,8 +1952,65 @@ namespace UFS2Tool
                 tailFreeFrags);
 
             fs.Flush();
+            if (totalFiles > 0 || totalBytes > 0)
+            {
+                long remainingBytes = totalBytes - copiedBytes;
+                if (remainingBytes < 0)
+                    remainingBytes = 0;
+                ReportCopyProgress(filesWritten, remainingBytes, force: true);
+                Console.WriteLine();
+            }
 
             Console.WriteLine($"  Populated image with {filesWritten} file(s) and {dirCount} directory(ies) from: {directoryPath}");
+        }
+
+        /// <summary>
+        /// Count regular files and their total byte size recursively for copy progress reporting.
+        /// </summary>
+        private static (int totalFiles, long totalBytes) CountFilesAndBytesRecursive(string dirPath)
+        {
+            int totalFiles = 0;
+            long totalBytes = 0;
+
+            foreach (var entry in new DirectoryInfo(dirPath).EnumerateFileSystemInfos("*", SearchOption.TopDirectoryOnly))
+            {
+                if (entry is DirectoryInfo subDir)
+                {
+                    var (subFiles, subBytes) = CountFilesAndBytesRecursive(subDir.FullName);
+                    totalFiles += subFiles;
+                    totalBytes += subBytes;
+                }
+                else if (entry is FileInfo file)
+                {
+                    totalFiles++;
+                    totalBytes += file.Length;
+                }
+            }
+
+            return (totalFiles, totalBytes);
+        }
+
+        /// <summary>
+        /// Format a byte count using binary units for concise progress output.
+        /// </summary>
+        private static string FormatBytes(long bytes)
+        {
+            double value = bytes;
+            if (value < 0)
+                value = 0;
+
+            string[] units = ["B", "KiB", "MiB", "GiB", "TiB"];
+            int unitIndex = 0;
+            while (value >= 1024 && unitIndex < units.Length - 1)
+            {
+                value /= 1024;
+                unitIndex++;
+            }
+
+            if (unitIndex == 0)
+                return $"{value:0} {units[unitIndex]}";
+
+            return $"{value:0.00} {units[unitIndex]}";
         }
 
         /// <summary>
@@ -1892,7 +2026,8 @@ namespace UFS2Tool
             ref int dirCount, ref int filesWritten,
             List<(string name, uint inode, byte fileType)> parentEntries, long timestamp,
             int[] dirsPerCg, int[]? perCgHighWater = null, long totalFrags = 0,
-            HashSet<long>? tailFreeFrags = null, uint parentDirDepth = 0)
+            HashSet<long>? tailFreeFrags = null, uint parentDirDepth = 0,
+            Action<int, long>? onCopyProgress = null)
         {
             uint maxInodes = (uint)(sb.NumCylGroups * sb.InodesPerGroup);
 
@@ -1917,7 +2052,7 @@ namespace UFS2Tool
                         ref nextInode, ref nextDataFragInCg, ref currentCg,
                         ref dirCount, ref filesWritten, subEntries, timestamp,
                         dirsPerCg, perCgHighWater, totalFrags, tailFreeFrags,
-                        parentDirDepth: childDepth);
+                        parentDirDepth: childDepth, onCopyProgress: onCopyProgress);
 
                     // Calculate how many blocks the directory needs
                     int dirBlocksNeeded = CalculateDirBlocksNeeded(subEntries, sb.BSize, FilesystemFormat == 2);
@@ -1971,13 +2106,15 @@ namespace UFS2Tool
 
                     uint fileInode = nextInode++;
                     long fileSize = file.Length;
+                    int completedFilesBeforeCurrent = filesWritten;
 
                     // Allocate blocks and write file content
                     var fileAlloc = AllocateAndWriteFile(
                         fs, writer, file.FullName, fileSize, sb,
                         fragsPerBlock, fragsPerGroup, dataStartFrag,
                         ref nextDataFragInCg, ref currentCg,
-                        perCgHighWater: perCgHighWater, totalFrags: totalFrags);
+                        perCgHighWater: perCgHighWater, totalFrags: totalFrags,
+                        onDataBytesWritten: bytes => onCopyProgress?.Invoke(completedFilesBeforeCurrent, bytes));
 
                     // Track tail-free fragments for the last block of this file.
                     // In UFS, fragment-level allocation (partial last block) only applies
@@ -2013,6 +2150,7 @@ namespace UFS2Tool
 
                     parentEntries.Add((file.Name, fileInode, Ufs2Constants.DtReg));
                     filesWritten++;
+                    onCopyProgress?.Invoke(filesWritten, 0);
                 }
             }
         }
@@ -2141,7 +2279,8 @@ namespace UFS2Tool
             int fragsPerBlock, int fragsPerGroup, int dataStartFrag,
             ref int nextDataFragInCg, ref int currentCg,
             ref long lastDataBlockFrag,
-            int[]? perCgHighWater = null, long totalFrags = 0)
+            int[]? perCgHighWater = null, long totalFrags = 0,
+            Action<long>? onDataBytesWritten = null)
         {
             int ptrSize = (FilesystemFormat == 1) ? 4 : 8;
             byte[] indirectBlock = new byte[sb.BSize];
@@ -2165,9 +2304,10 @@ namespace UFS2Tool
 
                 // Write file data to the allocated block
                 Array.Clear(buffer, 0, buffer.Length);
-                fileStream.Read(buffer, 0, buffer.Length);
+                int bytesRead = fileStream.Read(buffer, 0, buffer.Length);
                 fs.Position = dataBlockFrag * sb.FSize;
                 writer.Write(buffer);
+                onDataBytesWritten?.Invoke(bytesRead);
             }
 
             // Write the indirect pointer block
@@ -2185,7 +2325,8 @@ namespace UFS2Tool
             FileStream fs, BinaryWriter writer, string filePath, long fileSize,
             Ufs2Superblock sb, int fragsPerBlock, int fragsPerGroup, int dataStartFrag,
             ref int nextDataFragInCg, ref int currentCg,
-            int[]? perCgHighWater = null, long totalFrags = 0)
+            int[]? perCgHighWater = null, long totalFrags = 0,
+            Action<long>? onDataBytesWritten = null)
         {
             var result = new FileBlockAllocation
             {
@@ -2222,9 +2363,10 @@ namespace UFS2Tool
 
                 // Write file data
                 Array.Clear(buffer, 0, buffer.Length);
-                fileStream.Read(buffer, 0, buffer.Length);
+                int bytesRead = fileStream.Read(buffer, 0, buffer.Length);
                 fs.Position = blockFrag * sb.FSize;
                 writer.Write(buffer);
+                onDataBytesWritten?.Invoke(bytesRead);
             }
 
             long remaining = blocksNeeded - directBlocksToUse;
@@ -2247,7 +2389,8 @@ namespace UFS2Tool
                     singleCount, sb, indirectBlockFrag,
                     fragsPerBlock, fragsPerGroup, dataStartFrag,
                     ref nextDataFragInCg, ref currentCg,
-                    ref lastDataBlockFrag, perCgHighWater, totalFrags);
+                    ref lastDataBlockFrag, perCgHighWater, totalFrags,
+                    onDataBytesWritten);
 
                 remaining -= singleCount;
             }
@@ -2291,7 +2434,8 @@ namespace UFS2Tool
                         thisCount, sb, sindBlockFrag,
                         fragsPerBlock, fragsPerGroup, dataStartFrag,
                         ref nextDataFragInCg, ref currentCg,
-                        ref lastDataBlockFrag, perCgHighWater, totalFrags);
+                        ref lastDataBlockFrag, perCgHighWater, totalFrags,
+                        onDataBytesWritten);
 
                     remaining -= thisCount;
                 }
@@ -2365,7 +2509,8 @@ namespace UFS2Tool
                             thisCount, sb, sindBlockFrag,
                             fragsPerBlock, fragsPerGroup, dataStartFrag,
                             ref nextDataFragInCg, ref currentCg,
-                            ref lastDataBlockFrag, perCgHighWater, totalFrags);
+                            ref lastDataBlockFrag, perCgHighWater, totalFrags,
+                            onDataBytesWritten);
 
                         remaining -= thisCount;
                     }

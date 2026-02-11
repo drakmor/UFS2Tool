@@ -24,6 +24,7 @@ A complete implementation of FreeBSD's `newfs(8)` command for creating UFS1 and 
   - [ls](#ls--list-directory-contents)
   - [devinfo](#devinfo--show-device-information)
 - [Examples](#-examples)
+- [Quick Start](#-quick-start)
 - [Building](#-building)
 - [Testing](#-testing)
 - [Implementation Details](#-implementation-details)
@@ -217,6 +218,16 @@ ufs2tool ls myimage.img
 ```
 
 </details>
+
+---
+
+## Quick Start
+
+Use this command to quickly create a UFS2 image with FreeBSD-compatible FFS options:
+
+```powershell
+UFS2Tool.exe makefs -S 4096 -t ffs -o version=2,minfree=0,softupdates=0,optimization=space <PPAxxxx.ffpkg> <folder>
+```
 
 ---
 
