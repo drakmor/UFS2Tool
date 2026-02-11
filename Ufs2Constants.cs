@@ -61,8 +61,8 @@ namespace UFS2Tool
         public const ushort IfLnk = 0xA000;   // Symbolic link
 
         // Default permission modes (matching FreeBSD newfs convention)
-        public const ushort PermDir = 0x1ED;   // 0755 - rwxr-xr-x (directories)
-        public const ushort PermFile = 0x1A4;  // 0644 - rw-r--r-- (regular files)
+        public const ushort PermDir = 0x16D;   // 0555 - r-xr-xr-x (directories)
+        public const ushort PermFile = 0x16D;  // 0555 - r-xr-xr-x (regular files)
 
         // Number of direct and indirect block pointers
         public const int NDirect = 12;         // Direct block pointers (UFS_NDADDR)

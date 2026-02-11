@@ -1123,6 +1123,38 @@ namespace UFS2Tool.Tests
         }
 
         [Fact]
+        public void MakeFsImage_RestoresBlocksPerCylGroup_AfterCreation()
+        {
+            File.WriteAllText(Path.Combine(_testDir, "test.txt"), "data");
+
+            var creator = new Ufs2ImageCreator();
+            int origBpcg = creator.BlocksPerCylGroup;
+            creator.MakeFsImage(_imagePath, _testDir);
+
+            Assert.Equal(origBpcg, creator.BlocksPerCylGroup);
+        }
+
+        [Fact]
+        public void MakeFsImage_AutoMaxBpcg_UsesLargeBlocksPerCylinderGroup_ForLargeDataWithFewInodes()
+        {
+            // Large data with very few files should use larger blocks-per-CG to avoid
+            // excessive CG metadata overhead when maxbpcg is not specified.
+            File.WriteAllBytes(Path.Combine(_testDir, "large.bin"), new byte[64 * 1024 * 1024]);
+
+            var creator = new Ufs2ImageCreator();
+            creator.FilesystemFormat = 2;
+            creator.MakeFsImage(_imagePath, _testDir);
+
+            using var image = new Ufs2Image(_imagePath, readOnly: true);
+            var sb = image.Superblock;
+            int fragsPerBlock = sb.BSize / sb.FSize;
+            int blocksPerCg = sb.CylGroupSize / fragsPerBlock;
+
+            Assert.True(blocksPerCg > sb.InodesPerGroup,
+                $"Auto maxbpcg should create larger CG data area (blocks/CG={blocksPerCg}) than inode-count baseline (ipg={sb.InodesPerGroup}).");
+        }
+
+        [Fact]
         public void MakeFsImage_WithFreeFiles_IncreasesInodes()
         {
             // makefs -f 100 — ensure at least 100 extra free inodes
