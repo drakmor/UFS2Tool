@@ -1,0 +1,13 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.dll
+*.exe
+*.pdb
+*.img
+/tmp/
+UFS2Tool.Tests/bin/
+UFS2Tool.Tests/obj/
+test_output.log
