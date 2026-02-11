@@ -229,7 +229,7 @@ Use this command to quickly create a UFS2 image compatible to be mounted on the 
 UFS2Tool.exe newfs -D <folder> <PPSAxxxx.ffpkg>
 ```
 
-Alternatively you can use this command to quickly create a UFS2 image with FreeBSD-compatible FFS options which mounted on the PS5 with ShadowMount:
+Alternativelyy you can use this command to quickly create a UFS2 image with FreeBSD-compatible FFS options that can be mounted on the PS5 with ShadowMount:
 
 ```powershell
 UFS2Tool.exe makefs -S 4096 -t ffs -o version=2,minfree=0,softupdates=0,optimization=space <PPSAxxxx.ffpkg> <folder>
