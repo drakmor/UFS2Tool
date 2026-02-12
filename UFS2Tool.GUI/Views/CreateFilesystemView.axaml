@@ -1,0 +1,141 @@
+<!-- Copyright (c) 2026, SvenGDK -->
+<!-- Licensed under the BSD 2-Clause License. See LICENSE file for details. -->
+
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UFS2Tool.GUI.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+             x:Class="UFS2Tool.GUI.Views.CreateFilesystemView"
+             x:DataType="vm:CreateFilesystemViewModel">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16" Spacing="16">
+
+            <!-- Image File -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Loc[ImageFile]}" FontWeight="SemiBold" FontSize="15"/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="..." Click="BrowseImagePath_Click"
+                                Padding="12,6" Margin="8,0,0,0"/>
+                        <TextBox Text="{Binding ImagePath}" Watermark="{Binding Loc[ImagePathWatermark]}"/>
+                    </DockPanel>
+                    <TextBlock Text="{Binding Loc[ImagePathHint]}"
+                               FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Filesystem Options -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Loc[FilesystemOptions]}" FontWeight="SemiBold" FontSize="15"/>
+                    <Grid ColumnDefinitions="200,*,16,200,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                          RowSpacing="8" ColumnSpacing="8">
+
+                        <!-- Row 0 -->
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Loc[FilesystemFormat]}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Row="0" Grid.Column="1" SelectedIndex="{Binding FilesystemFormatIndex}"
+                                  HorizontalAlignment="Stretch">
+                            <ComboBoxItem Content="UFS1" Tag="1"/>
+                            <ComboBoxItem Content="UFS2" Tag="2"/>
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="0" Grid.Column="3" Text="{Binding Loc[BlockSize]}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="0" Grid.Column="4" Text="{Binding BlockSize}"
+                                 Watermark="32768"/>
+
+                        <!-- Row 1 -->
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding Loc[FragmentSize]}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding FragmentSize}"
+                                 Watermark="4096"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding Loc[SectorSize]}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="1" Grid.Column="4" Text="{Binding SectorSize}"
+                                 Watermark="512"/>
+
+                        <!-- Row 2 -->
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Loc[VolumeName]}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding VolumeName}"
+                                 Watermark="{Binding Loc[VolumeNameWatermark]}"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="3" Text="{Binding Loc[MinFreePercent]}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="2" Grid.Column="4" Text="{Binding MinFreePercent}"
+                                 Watermark="8"/>
+
+                        <!-- Row 3 -->
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="{Binding Loc[Optimization]}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Row="3" Grid.Column="1" HorizontalAlignment="Stretch"
+                                  SelectedItem="{Binding OptimizationPreference}">
+                            <x:String>time</x:String>
+                            <x:String>space</x:String>
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="3" Grid.Column="3" Text="{Binding Loc[BytesPerInode]}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="3" Grid.Column="4" Text="{Binding BytesPerInode}"
+                                 Watermark="{Binding Loc[BytesPerInodeWatermark]}"/>
+
+                        <!-- Row 4 -->
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="{Binding Loc[ImageSizeMB]}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding SizeInMB}"
+                                 Watermark="100"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Input Directory -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Loc[InputDirectory]}" FontWeight="SemiBold" FontSize="15"/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="..." Click="BrowseInputDirectory_Click"
+                                Padding="12,6" Margin="8,0,0,0"/>
+                        <TextBox Text="{Binding InputDirectory}"
+                                 Watermark="{Binding Loc[InputDirectoryWatermark]}"/>
+                    </DockPanel>
+                    <TextBlock Text="{Binding Loc[InputDirectoryHint]}"
+                               FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Flags -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Loc[Flags]}" FontWeight="SemiBold" FontSize="15"/>
+                    <WrapPanel Orientation="Horizontal">
+                        <CheckBox Content="{Binding Loc[SoftUpdates]}" IsChecked="{Binding SoftUpdates}"
+                                  Margin="0,0,24,0"/>
+                        <CheckBox Content="{Binding Loc[SUJournaling]}" IsChecked="{Binding SoftUpdatesJournal}"
+                                  Margin="0,0,24,0"/>
+                        <CheckBox Content="{Binding Loc[TRIM]}" IsChecked="{Binding TrimEnabled}"
+                                  Margin="0,0,24,0"/>
+                        <CheckBox Content="{Binding Loc[EraseContents]}" IsChecked="{Binding EraseContents}"
+                                  Margin="0,0,24,0"/>
+                        <CheckBox Content="{Binding Loc[DryRun]}" IsChecked="{Binding DryRun}"/>
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Create Button -->
+            <Button Content="{Binding Loc[CreateFilesystem]}" Command="{Binding CreateFilesystemCommand}"
+                    IsEnabled="{Binding !IsRunning}"
+                    HorizontalAlignment="Right" Padding="24,8"
+                    FontWeight="SemiBold" FontSize="14"
+                    Classes="accent"/>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -1,0 +1,82 @@
+<!-- Copyright (c) 2026, SvenGDK -->
+<!-- Licensed under the BSD 2-Clause License. See LICENSE file for details. -->
+
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UFS2Tool.GUI.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+             x:Class="UFS2Tool.GUI.Views.PS5QuickCreateView"
+             x:DataType="vm:PS5QuickCreateViewModel">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16" Spacing="16">
+
+            <!-- Description -->
+            <Border Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
+                    CornerRadius="4" Padding="12">
+                <TextBlock Text="{Binding Loc[PS5Description]}"
+                           TextWrapping="Wrap" FontSize="13"/>
+            </Border>
+
+            <!-- Input Directory -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Loc[PS5InputDirectory]}" FontWeight="SemiBold" FontSize="15"/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="..." Click="BrowseInputDirectory_Click"
+                                Padding="12,6" Margin="8,0,0,0"/>
+                        <TextBox Text="{Binding InputDirectory}" Watermark="{Binding Loc[PS5InputDirectoryWatermark]}"/>
+                    </DockPanel>
+                    <TextBlock Text="{Binding Loc[PS5InputDirectoryHint]}"
+                               FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Output Filename -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Loc[PS5Filename]}" FontWeight="SemiBold" FontSize="15"/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="..." Click="BrowseImagePath_Click"
+                                Padding="12,6" Margin="8,0,0,0"/>
+                        <TextBox Text="{Binding ImagePath}" Watermark="{Binding Loc[PS5FilenameWatermark]}"/>
+                    </DockPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Configuration -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Loc[PS5Preset]}" FontWeight="SemiBold" FontSize="15"/>
+                    <StackPanel Spacing="4">
+                        <RadioButton Content="{Binding Loc[PS5UseMakefs]}"
+                                     IsChecked="{Binding UseMakefs}"
+                                     GroupName="PS5Method"/>
+                        <TextBlock Text="{Binding Loc[PS5MakefsHint]}"
+                                   FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"
+                                   Margin="24,0,0,0" TextWrapping="Wrap"/>
+                        <RadioButton Content="{Binding Loc[PS5UseNewfs]}"
+                                     IsChecked="{Binding UseNewfs}"
+                                     GroupName="PS5Method"
+                                     Margin="0,8,0,0"/>
+                        <TextBlock Text="{Binding Loc[PS5NewfsHint]}"
+                                   FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"
+                                   Margin="24,0,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Create Button -->
+            <Button Content="{Binding Loc[PS5CreateButton]}" Command="{Binding CreatePS5ImageCommand}"
+                    IsEnabled="{Binding !IsRunning}"
+                    HorizontalAlignment="Right" Padding="24,8"
+                    FontWeight="SemiBold" FontSize="14"
+                    Classes="accent"/>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

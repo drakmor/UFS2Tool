@@ -36,6 +36,7 @@ namespace Ufs2Tool
                     "replace" => HandleReplace(args),
                     "add" => HandleAdd(args),
                     "delete" => HandleDelete(args),
+                    "chmod" => HandleChmod(args),
                     "devinfo" => HandleDevInfo(args),
                     "mount_udf" => HandleMountUdf(args),
                     "umount_udf" => HandleUmountUdf(args),
@@ -2006,6 +2007,162 @@ namespace Ufs2Tool
         }
 
         /// <summary>
+        /// Change permissions (mode) of a file or directory in a UFS1/UFS2 filesystem image.
+        ///
+        /// Synopsis:
+        ///   chmod [-R] &lt;image-path&gt; &lt;mode&gt; [fs-path]
+        ///
+        /// Where:
+        ///   mode    = Octal permission mode (e.g., 755, 644)
+        ///   fs-path = Path in the filesystem (omit or use "/" with -R for entire image)
+        ///   -R      = Apply recursively to entire image using mode for files and
+        ///             mode+execute for directories (e.g., 644 files → 755 dirs)
+        /// </summary>
+        static int HandleChmod(string[] args)
+        {
+            bool recursive = false;
+            var positional = new List<string>();
+
+            int i = 1;
+            while (i < args.Length)
+            {
+                if (args[i] == "-R")
+                {
+                    recursive = true;
+                }
+                else if (args[i] == "--help")
+                {
+                    PrintChmodUsage();
+                    return 0;
+                }
+                else
+                {
+                    positional.Add(args[i]);
+                }
+                i++;
+            }
+
+            if (recursive)
+            {
+                // chmod -R <image-path> <file-mode> [dir-mode]
+                if (positional.Count < 2)
+                {
+                    PrintChmodUsage();
+                    return 1;
+                }
+
+                string imagePath = positional[0];
+                if (!TryParseOctalMode(positional[1], out ushort fileMode))
+                {
+                    Console.Error.WriteLine($"Error: Invalid octal mode '{positional[1]}'.");
+                    return 1;
+                }
+
+                ushort dirMode;
+                if (positional.Count >= 3)
+                {
+                    if (!TryParseOctalMode(positional[2], out dirMode))
+                    {
+                        Console.Error.WriteLine($"Error: Invalid octal directory mode '{positional[2]}'.");
+                        return 1;
+                    }
+                }
+                else
+                {
+                    // Default: add execute bit to directories if set for user/group/other read
+                    dirMode = AddExecuteBits(fileMode);
+                }
+
+                using var image = new Ufs2Image(imagePath, readOnly: false);
+                image.ChmodAll(fileMode, dirMode);
+
+                Console.WriteLine($"Changed permissions: files=0{Convert.ToString(fileMode, 8)}, dirs=0{Convert.ToString(dirMode, 8)} (entire image).");
+                return 0;
+            }
+            else
+            {
+                // chmod <image-path> <mode> <fs-path>
+                if (positional.Count < 3)
+                {
+                    PrintChmodUsage();
+                    return 1;
+                }
+
+                string imagePath = positional[0];
+                if (!TryParseOctalMode(positional[1], out ushort mode))
+                {
+                    Console.Error.WriteLine($"Error: Invalid octal mode '{positional[1]}'.");
+                    return 1;
+                }
+                string fsPath = positional[2];
+
+                using var image = new Ufs2Image(imagePath, readOnly: false);
+                image.Chmod(fsPath, mode);
+
+                Console.WriteLine($"Changed permissions of '{fsPath}' to 0{Convert.ToString(mode, 8)}.");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Parse an octal mode string (e.g., "755", "0644") into a ushort.
+        /// </summary>
+        static bool TryParseOctalMode(string modeStr, out ushort mode)
+        {
+            mode = 0;
+            try
+            {
+                int value = Convert.ToInt32(modeStr, 8);
+                if (value < 0 || value > 0x0FFF) // Max permission bits (4095)
+                    return false;
+                mode = (ushort)value;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Add execute bits to a file mode for directory use.
+        /// If any read bit is set, the corresponding execute bit is added.
+        /// E.g., 0644 → 0755 (user read+write → +exec, group/other read → +exec)
+        /// </summary>
+        static ushort AddExecuteBits(ushort fileMode)
+        {
+            ushort dirMode = fileMode;
+            // If user has read (0400), add user execute (0100)
+            if ((dirMode & 0x100) != 0) dirMode |= 0x040;
+            // If group has read (0040), add group execute (0010)
+            if ((dirMode & 0x020) != 0) dirMode |= 0x008;
+            // If other has read (0004), add other execute (0001)
+            if ((dirMode & 0x004) != 0) dirMode |= 0x001;
+            return dirMode;
+        }
+
+        static void PrintChmodUsage()
+        {
+            Console.Error.WriteLine("""
+                Usage: ufs2tool chmod [-R] <image-path> <mode> [fs-path | dir-mode]
+
+                  Change permissions of a file or directory:
+                    ufs2tool chmod myimage.img 755 /path/to/file_or_dir
+
+                  Change permissions of the entire image recursively:
+                    ufs2tool chmod -R myimage.img 644
+                    (Files get 0644, directories get 0755 automatically)
+
+                  Specify separate file and directory modes:
+                    ufs2tool chmod -R myimage.img 644 755
+
+                  mode     Octal permission mode (e.g., 755, 644, 0777)
+                  fs-path  Path to file or directory in the filesystem
+                  -R       Apply recursively to entire image
+                """);
+        }
+
+        /// <summary>
         /// Show information about a device (for debugging / verification).
         /// </summary>
         static int HandleDevInfo(string[] args)
@@ -2535,6 +2692,9 @@ namespace Ufs2Tool
                   delete  <image-path> <fs-path>
                           Delete a file or directory from a UFS1/UFS2 filesystem image.
                           If fs-path is a directory, deletes all contents recursively.
+                  chmod   [-R] <image-path> <mode> [fs-path]
+                          Change permissions of a file or directory in a UFS image.
+                          With -R, apply to entire image (files and directories).
                   devinfo <device-path>
                           Show device size and sector information
                   mount_udf [-o options] [-v] <image-path> <drive-letter>
@@ -2577,6 +2737,9 @@ namespace Ufs2Tool
                   ufs2tool add myimage.img /newdir ./local/dir
                   ufs2tool delete myimage.img /path/to/file.txt
                   ufs2tool delete myimage.img /path/to/dir
+                  ufs2tool chmod myimage.img 755 /path/to/dir
+                  ufs2tool chmod -R myimage.img 644
+                  ufs2tool chmod -R myimage.img 644 755
                   ufs2tool devinfo \\.\PhysicalDrive2
                   ufs2tool mount_udf myimage.img X:
                   ufs2tool mount_udf -v myimage.img Z:
@@ -2590,6 +2753,7 @@ namespace Ufs2Tool
                 For full growfs options: ufs2tool growfs --help
                 For full fsck_ufs options: ufs2tool fsck_ufs --help
                 For full mount_udf options: ufs2tool mount_udf --help
+                For full chmod options: ufs2tool chmod --help
                 """);
         }
 

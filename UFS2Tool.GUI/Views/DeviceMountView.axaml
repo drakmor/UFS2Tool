@@ -1,0 +1,92 @@
+<!-- Copyright (c) 2026, SvenGDK -->
+<!-- Licensed under the BSD 2-Clause License. See LICENSE file for details. -->
+
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UFS2Tool.GUI.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+             x:Class="UFS2Tool.GUI.Views.DeviceMountView"
+             x:DataType="vm:DeviceMountViewModel">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16" Spacing="16">
+
+            <!-- Platform Notice -->
+            <Border Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
+                    CornerRadius="4" Padding="12">
+                <TextBlock Text="{Binding Loc[DeviceMountNotice]}"
+                           TextWrapping="Wrap" FontSize="13"/>
+            </Border>
+
+            <!-- Device Information -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding Loc[DeviceInformation]}" FontWeight="SemiBold" FontSize="15"/>
+                    <Grid ColumnDefinitions="120,*,8,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="{Binding Loc[DevicePath]}" VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1" Text="{Binding DevicePath}"
+                                 Watermark="\\.\PhysicalDrive1"/>
+                        <Button Grid.Column="3" Content="{Binding Loc[ShowInfo]}"
+                                Command="{Binding ShowDeviceInfoCommand}"
+                                IsEnabled="{Binding !IsRunning}" Padding="16,6"/>
+                    </Grid>
+                    <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                            CornerRadius="4" Padding="12" MinHeight="60"
+                            IsVisible="{Binding DeviceInfoText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <TextBlock Text="{Binding DeviceInfoText}" TextWrapping="Wrap"
+                                   FontFamily="Cascadia Mono,Consolas,Courier New,monospace"
+                                   FontSize="12"/>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- Mount Filesystem -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding Loc[MountFilesystem]}" FontWeight="SemiBold" FontSize="15"/>
+                    <Grid ColumnDefinitions="120,*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8"
+                          RowSpacing="8">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Loc[ImagePath]}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ImagePath}"
+                                 Watermark="{Binding Loc[ImagePathFSWatermark]}"/>
+                        <Button Grid.Row="0" Grid.Column="2" Content="..." Click="BrowseImagePath_Click"
+                                Padding="12,6"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding Loc[DriveLetter]}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding MountDriveLetter}"
+                                 Watermark="Z" MaxWidth="80" HorizontalAlignment="Left"/>
+
+                        <CheckBox Grid.Row="2" Grid.Column="1" Content="{Binding Loc[ReadWriteMode]}"
+                                  IsChecked="{Binding MountReadWrite}"/>
+                    </Grid>
+                    <Button Content="{Binding Loc[Mount]}" Command="{Binding MountCommand}"
+                            IsEnabled="{Binding !IsRunning}" HorizontalAlignment="Right"
+                            Padding="20,6" Classes="accent"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Unmount -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding Loc[UnmountFilesystem]}" FontWeight="SemiBold" FontSize="15"/>
+                    <Grid ColumnDefinitions="120,*,8,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="{Binding Loc[DriveLetter]}" VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1" Text="{Binding MountDriveLetter}"
+                                 Watermark="Z" MaxWidth="80" HorizontalAlignment="Left"/>
+                        <Button Grid.Column="3" Content="{Binding Loc[Unmount]}"
+                                Command="{Binding UnmountCommand}"
+                                IsEnabled="{Binding !IsRunning}" Padding="20,6"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

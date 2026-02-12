@@ -1,0 +1,32 @@
+<!-- Copyright (c) 2026, SvenGDK -->
+<!-- Licensed under the BSD 2-Clause License. See LICENSE file for details. -->
+
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:UFS2Tool.GUI.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="400"
+        x:Class="UFS2Tool.GUI.Views.OutputLogWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="UFS2 Tool — Output Log"
+        Width="700" Height="400"
+        MinWidth="400" MinHeight="200">
+
+    <DockPanel>
+        <DockPanel DockPanel.Dock="Top" Margin="8,4">
+            <TextBlock Text="{Binding Loc[OutputLog]}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <Button Content="{Binding Loc[Clear]}" Command="{Binding ClearLogCommand}" HorizontalAlignment="Right"
+                    Padding="12,2" FontSize="12"/>
+        </DockPanel>
+        <ListBox ItemsSource="{Binding OutputLog}" Margin="8,0,8,4"
+                 FontFamily="Cascadia Mono,Consolas,Courier New,monospace" FontSize="12">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding}" TextWrapping="Wrap"/>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </DockPanel>
+</Window>

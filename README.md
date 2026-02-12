@@ -2,13 +2,13 @@
 
 # 🗄️ UFS2Tool
 
-**FreeBSD UFS1/UFS2 Filesystem Manager for Windows**
+**FreeBSD UFS1/UFS2 Filesystem Manager**
 
 [![License: BSD-2-Clause](https://img.shields.io/badge/License-BSD_2--Clause-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
-[![Platform](https://img.shields.io/badge/Platform-Windows-0078D6.svg)](#)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-0078D6.svg)](#)
 
-A complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `growfs(8)`, and `fsck_ufs(8)` commands for creating, managing, and checking UFS1 and UFS2 filesystems on Windows, targeting both image files and raw disk devices.
+A complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `growfs(8)`, `fsck_ufs(8)`, and `chmod` commands for creating, managing, and checking UFS1 and UFS2 filesystems, targeting both image files and raw disk devices (Windows). Image file operations work on any platform supported by .NET 8.0.
 
 </div>
 
@@ -21,6 +21,7 @@ A complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `gr
   - [newfs](#newfs--create-a-new-ufs1ufs2-filesystem)
   - [info](#info--show-filesystem-information)
   - [makefs](#makefs--create-filesystem-image-from-directory-tree)
+  - [tunefs](#tunefs--tune-existing-filesystem-parameters)
   - [growfs](#growfs--expand-an-existing-filesystem)
   - [fsck_ufs](#fsck_ufs--filesystem-consistency-check)
   - [ls](#ls--list-directory-contents)
@@ -28,13 +29,17 @@ A complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `gr
   - [replace](#replace--replace-files-in-filesystem)
   - [add](#add--add-files-to-filesystem)
   - [delete](#delete--delete-files-from-filesystem)
+  - [chmod](#chmod--change-file-permissions)
   - [mount_udf](#mount_udf--mount-ufs-image-as-windows-drive)
+  - [umount_udf](#umount_udf--unmount-a-ufs-drive)
   - [devinfo](#devinfo--show-device-information)
 - [Examples](#-examples)
 - [PS5 Quick Start](#-ps5-quick-start)
+- [GUI Application](#-gui-application)
 - [Building](#-building)
 - [Testing](#-testing)
 - [Implementation Details](#-implementation-details)
+- [Platform-Specific Guides](#-platform-specific-guides)
 - [Notes](#-notes)
 - [License](#-license)
 
@@ -153,6 +158,56 @@ ufs2tool makefs [-DxZ] [-B endian] [-b free-blocks] [-f free-files]
 
 **Size suffixes:** `b` (×512), `k` (×1024), `m` (×1M), `g` (×1G), `t` (×1T), `w` (×4).
 Products with `x`: e.g., `512x1024` = 524288.
+
+### `tunefs` — Tune existing filesystem parameters
+
+```
+ufs2tool tunefs [-Ap] [-a enable|disable] [-e maxbpg] [-f avgfilesize]
+               [-J enable|disable] [-j enable|disable] [-k metaspace]
+               [-L volname] [-l enable|disable] [-m minfree]
+               [-N enable|disable] [-n enable|disable] [-o space|time]
+               [-s avgfpdir] [-t enable|disable] <image-path>
+```
+
+Modify layout parameters on an existing UFS1/UFS2 filesystem image. Equivalent to FreeBSD's `tunefs(8)`.
+
+<details>
+<summary><strong>Options</strong></summary>
+
+| Option | Description |
+|--------|-------------|
+| `-A` | Write the updated superblock to all backup superblock locations |
+| `-a enable\|disable` | Enable or disable POSIX.1e ACL support |
+| `-e maxbpg` | Set maximum blocks per file in a cylinder group |
+| `-f avgfilesize` | Set expected average file size |
+| `-J enable\|disable` | Enable or disable gjournal |
+| `-j enable\|disable` | Enable or disable soft updates journaling (enabling also enables soft updates) |
+| `-k metaspace` | Set space (in frags) to hold for metadata blocks |
+| `-L volname` | Set volume label (alphanumerics, dashes, underscores; max 31 chars) |
+| `-l enable\|disable` | Enable or disable multilabel MAC support |
+| `-m minfree` | Set minimum percentage of free space (0–99) |
+| `-N enable\|disable` | Enable or disable NFSv4 ACL support |
+| `-n enable\|disable` | Enable or disable soft updates |
+| `-o space\|time` | Set optimization preference |
+| `-p` | Print current tuneable values and exit (read-only) |
+| `-s avgfpdir` | Set expected number of files per directory |
+| `-t enable\|disable` | Enable or disable TRIM/DISCARD support |
+
+</details>
+
+```bash
+# Print current tuneable values
+ufs2tool tunefs -p myimage.img
+
+# Enable soft updates journaling
+ufs2tool tunefs -j enable myimage.img
+
+# Set volume label and minfree
+ufs2tool tunefs -L MYVOLUME -m 5 myimage.img
+
+# Write updated superblock to all backup locations
+ufs2tool tunefs -A -n enable myimage.img
+```
 
 ### `growfs` — Expand an existing filesystem
 
@@ -288,6 +343,32 @@ ufs2tool delete myimage.img /path/to/file.txt
 ufs2tool delete myimage.img /path/to/dir
 ```
 
+### `chmod` — Change file permissions
+
+```
+ufs2tool chmod [-R] <image-path> <mode> [fs-path | dir-mode]
+```
+
+Change the permission mode of a file or directory inside a UFS1/UFS2 filesystem image, or apply permissions to the entire image recursively.
+
+| Option | Description |
+|--------|-------------|
+| `-R` | Apply recursively to entire image |
+
+```bash
+# Change permissions on a single file
+ufs2tool chmod myimage.img 644 /path/to/file.txt
+
+# Change permissions on a directory
+ufs2tool chmod myimage.img 755 /path/to/dir
+
+# Recursively set file permissions for the entire image
+ufs2tool chmod -R myimage.img 644
+
+# Recursively set file and directory permissions separately
+ufs2tool chmod -R myimage.img 644 755
+```
+
 ### `mount_udf` — Mount UFS image as Windows drive
 
 ```
@@ -314,6 +395,14 @@ ufs2tool umount_udf X:
 ```
 
 Requires the [Dokan driver](https://github.com/dokan-dev/dokany/releases) to be installed.
+
+### `umount_udf` — Unmount a UFS drive
+
+```
+ufs2tool umount_udf <drive-letter>
+```
+
+Unmount a previously mounted UFS filesystem drive. Alternatively, pressing Ctrl+C in the `mount_udf` terminal also cleanly unmounts.
 
 ### `devinfo` — Show device information
 
@@ -425,21 +514,54 @@ UFS2Tool.exe makefs -S 4096 -t ffs -o version=2,minfree=0,softupdates=0,optimiza
 
 ---
 
+## 🖥️ GUI Application
+
+The project includes a modern cross-platform GUI built with [Avalonia UI](https://avaloniaui.net/) in the `UFS2Tool.GUI` directory. The GUI provides a graphical interface for all major UFS2Tool operations:
+
+- **Create Filesystem** — Create UFS1/UFS2 images with configurable parameters
+- **Filesystem Operations** — List, extract, add, delete, replace files, and change permissions
+- **Maintenance** — TuneFS, GrowFS, and FsckUFS operations
+- **Device Mount** — Mount/unmount UFS images as Windows drives (Windows only, requires Dokan)
+- **PS5 Quick Create** — Preset templates for PS5-compatible filesystem creation
+- **Settings** — Language selection (supports 11 languages)
+
+**Building the GUI:**
+
+```bash
+dotnet build UFS2Tool.GUI/UFS2Tool.GUI.csproj
+```
+
+**Running the GUI:**
+
+```bash
+dotnet run --project UFS2Tool.GUI/UFS2Tool.GUI.csproj
+```
+
+> **Note:** The GUI runs on Windows, Linux, and macOS. See the [Platform-Specific Guides](#-platform-specific-guides) section for setup instructions on each platform.
+
+---
+
 ## 🔨 Building
 
 Requires [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later.
 
-**Using the solution file (recommended for Visual Studio):**
+**Using the solution file (builds CLI, GUI, and tests):**
 
 ```bash
 dotnet build UFS2-Tool.sln
 ```
 
-**Using the project file directly:**
+**Using the project file directly (CLI only):**
 
 ```bash
 dotnet build UFS2Tool.csproj
 dotnet run -- newfs myimage.img 256
+```
+
+**GUI only:**
+
+```bash
+dotnet build UFS2Tool.GUI/UFS2Tool.GUI.csproj
 ```
 
 ---
@@ -465,6 +587,7 @@ dotnet test
 | `TuneFsTests` | Tests tunefs command and filesystem tuning |
 | `GrowFsTests` | Tests growfs command and filesystem expansion |
 | `FsckUfsTests` | Tests fsck_ufs command and filesystem consistency checking |
+| `ChmodTests` | Tests chmod functionality: permission changes, recursive operations, and file type bit preservation |
 
 ---
 
@@ -474,11 +597,18 @@ For a detailed breakdown of the core library components, filesystem structures, 
 
 ---
 
+## 🌐 Platform-Specific Guides
+
+- **[Linux Guide](LINUX.md)** — Required packages and step-by-step instructions for running UFS2Tool and the GUI on Linux
+- **[macOS Guide](macOS.md)** — Required packages and step-by-step instructions for running UFS2Tool and the GUI on macOS
+
+---
+
 ## 📝 Notes
 
-- Device operations (`newfs` on physical drives, `devinfo`) require **Administrator privileges** on Windows.
-- The tool targets `net8.0` and uses conditional Windows-specific features for device I/O support.
-- Image file operations work on any platform supported by .NET 8.0.
+- Device operations (`newfs` on physical drives, `devinfo`, `mount_udf`) require **Administrator privileges** on Windows.
+- The tool targets `net8.0` and uses conditional Windows-specific features for device I/O and Dokan mounting.
+- Image file operations (create, inspect, extract, add, delete, replace, chmod, growfs, tunefs, fsck) work on any platform supported by .NET 8.0.
 - Filesystem images created by this tool are compatible with FreeBSD's `mount` and `fsck_ffs`.
 - When creating images with `makefs`, soft updates are disabled by default (`softupdates=0`), matching FreeBSD `makefs(8)` behavior. Use `-o softupdates=1` to enable them explicitly.
 

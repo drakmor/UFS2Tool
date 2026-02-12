@@ -10,4 +10,6 @@ obj/
 /tmp/
 UFS2Tool.Tests/bin/
 UFS2Tool.Tests/obj/
+UFS2Tool.GUI/bin/
+UFS2Tool.GUI/obj/
 test_output.log

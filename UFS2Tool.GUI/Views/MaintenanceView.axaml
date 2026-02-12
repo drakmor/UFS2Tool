@@ -1,0 +1,113 @@
+<!-- Copyright (c) 2026, SvenGDK -->
+<!-- Licensed under the BSD 2-Clause License. See LICENSE file for details. -->
+
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UFS2Tool.GUI.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+             x:Class="UFS2Tool.GUI.Views.MaintenanceView"
+             x:DataType="vm:MaintenanceViewModel">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16" Spacing="16">
+
+            <!-- Shared Image Path -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <Grid ColumnDefinitions="100,*,Auto" ColumnSpacing="8">
+                    <TextBlock Text="{Binding Loc[ImagePath]}" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="1" Text="{Binding ImagePath}"
+                             Watermark="{Binding Loc[ImagePathFSWatermark]}"/>
+                    <Button Grid.Column="2" Content="..." Click="BrowseImagePath_Click"
+                            Padding="12,6"/>
+                </Grid>
+            </Border>
+
+            <!-- Tune Filesystem -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding Loc[TuneFilesystem]}" FontWeight="SemiBold" FontSize="15"/>
+                    <Grid ColumnDefinitions="180,*,16,180,*" RowDefinitions="Auto,Auto,Auto"
+                          ColumnSpacing="8" RowSpacing="8">
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Loc[VolumeName]}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding TuneVolumeName}"
+                                 Watermark="{Binding Loc[NewVolumeName]}"/>
+
+                        <TextBlock Grid.Row="0" Grid.Column="3" Text="{Binding Loc[MinFreePercent]}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="0" Grid.Column="4" Text="{Binding TuneMinFreePercent}"
+                                 Watermark="e.g. 8"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding Loc[Optimization]}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch"
+                                  SelectedItem="{Binding TuneOptimization}">
+                            <x:String>time</x:String>
+                            <x:String>space</x:String>
+                        </ComboBox>
+
+                        <CheckBox Grid.Row="1" Grid.Column="3" Grid.ColumnSpan="2"
+                                  Content="{Binding Loc[PrintOnly]}"
+                                  IsChecked="{Binding TunePrintOnly}" VerticalAlignment="Center"/>
+
+                        <CheckBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                                  Content="{Binding Loc[EnableSoftUpdates]}"
+                                  IsChecked="{Binding TuneSoftUpdates}"/>
+                        <CheckBox Grid.Row="2" Grid.Column="3" Grid.ColumnSpan="2"
+                                  Content="{Binding Loc[EnableSUJournaling]}"
+                                  IsChecked="{Binding TuneSoftUpdatesJournal}"/>
+                    </Grid>
+                    <Button Content="{Binding Loc[TuneButton]}" Command="{Binding TuneFilesystemCommand}"
+                            IsEnabled="{Binding !IsRunning}" HorizontalAlignment="Right"
+                            Padding="20,6" Classes="accent"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Grow Filesystem -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding Loc[GrowFilesystem]}" FontWeight="SemiBold" FontSize="15"/>
+                    <Grid ColumnDefinitions="180,*,16,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="{Binding Loc[NewSizeMB]}" VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1" Text="{Binding NewSizeInMB}" Watermark="200"/>
+                        <CheckBox Grid.Column="3" Content="{Binding Loc[DryRun]}" IsChecked="{Binding GrowDryRun}"
+                                  VerticalAlignment="Center"/>
+                    </Grid>
+                    <Button Content="{Binding Loc[GrowButton]}" Command="{Binding GrowFilesystemCommand}"
+                            IsEnabled="{Binding !IsRunning}" HorizontalAlignment="Right"
+                            Padding="20,6" Classes="accent"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Check Filesystem -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding Loc[CheckFilesystem]}" FontWeight="SemiBold" FontSize="15"/>
+                    <WrapPanel Orientation="Horizontal">
+                        <CheckBox Content="{Binding Loc[PreenAutoFix]}" IsChecked="{Binding FsckPreen}"
+                                  Margin="0,0,24,0"/>
+                        <CheckBox Content="{Binding Loc[DebugOutput]}" IsChecked="{Binding FsckDebug}"/>
+                    </WrapPanel>
+                    <Button Content="{Binding Loc[CheckButton]}" Command="{Binding CheckFilesystemCommand}"
+                            IsEnabled="{Binding !IsRunning}" HorizontalAlignment="Right"
+                            Padding="20,6" Classes="accent"/>
+                    <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                            CornerRadius="4" Padding="12" MinHeight="60"
+                            IsVisible="{Binding FsckResultText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <TextBlock Text="{Binding FsckResultText}" TextWrapping="Wrap"
+                                   FontFamily="Cascadia Mono,Consolas,Courier New,monospace"
+                                   FontSize="12"/>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

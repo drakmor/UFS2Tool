@@ -1,0 +1,111 @@
+<!-- Copyright (c) 2026, SvenGDK -->
+<!-- Licensed under the BSD 2-Clause License. See LICENSE file for details. -->
+
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UFS2Tool.GUI.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+             x:Class="UFS2Tool.GUI.Views.FilesystemOperationsView"
+             x:DataType="vm:FilesystemOperationsViewModel">
+
+    <DockPanel Margin="16">
+
+        <!-- Image Path & FS Path -->
+        <Border DockPanel.Dock="Top"
+                BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                CornerRadius="4" Padding="16" Margin="0,0,0,12">
+            <Grid ColumnDefinitions="100,*,Auto,16,100,*" RowDefinitions="Auto" ColumnSpacing="8">
+                <TextBlock Grid.Column="0" Text="{Binding Loc[ImagePath]}" VerticalAlignment="Center"/>
+                <TextBox Grid.Column="1" Text="{Binding ImagePath}"
+                         Watermark="{Binding Loc[ImagePathFSWatermark]}"/>
+                <Button Grid.Column="2" Content="..." Click="BrowseImagePath_Click"
+                        Padding="12,6"/>
+                <TextBlock Grid.Column="4" Text="{Binding Loc[FSPath]}" VerticalAlignment="Center"/>
+                <TextBox Grid.Column="5" Text="{Binding FsPath}" Watermark="/"/>
+            </Grid>
+        </Border>
+
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top" Margin="0,0,0,12">
+            <WrapPanel Orientation="Horizontal">
+                <Button Content="{Binding Loc[Info]}" Command="{Binding ShowInfoCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[ListLS]}" Command="{Binding ListDirectoryCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[Extract]}" Command="{Binding ExtractCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[Add]}" Command="{Binding AddCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[Delete]}" Command="{Binding DeleteCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[Replace]}" Command="{Binding ReplaceCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[Chmod]}" Command="{Binding ChmodCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+            </WrapPanel>
+        </Border>
+
+        <!-- Parameters -->
+        <Border DockPanel.Dock="Top"
+                BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                CornerRadius="4" Padding="16" Margin="0,0,0,12">
+            <Grid ColumnDefinitions="140,*,16,140,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="8">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Loc[LocalPath]}" VerticalAlignment="Center"/>
+                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding LocalPath}"
+                         Watermark="{Binding Loc[LocalPathWatermark]}"/>
+
+                <TextBlock Grid.Row="0" Grid.Column="3" Text="{Binding Loc[OutputDirectory]}" VerticalAlignment="Center"/>
+                <TextBox Grid.Row="0" Grid.Column="4" Text="{Binding OutputDirectory}"
+                         Watermark="{Binding Loc[OutputDirectoryWatermark]}"/>
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding Loc[ChmodMode]}" VerticalAlignment="Center"/>
+                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ChmodMode}"
+                         Watermark="755" MaxWidth="120" HorizontalAlignment="Left"/>
+
+                <CheckBox Grid.Row="1" Grid.Column="3" Grid.ColumnSpan="2"
+                          Content="{Binding Loc[RecursiveChmod]}" IsChecked="{Binding ChmodRecursive}"
+                          VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+
+        <!-- Content Area: Directory Listing + Superblock Info -->
+        <Grid RowDefinitions="*,Auto">
+            <!-- Directory Listing -->
+            <Border Grid.Row="0"
+                    BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="0" Margin="0,0,0,12">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="{Binding Loc[DirectoryListing]}" FontWeight="SemiBold"
+                               FontSize="14" Margin="12,8,12,4"/>
+                    <DataGrid x:Name="DirectoryGrid"
+                              ItemsSource="{Binding DirectoryEntries}"
+                              IsReadOnly="True" AutoGenerateColumns="False"
+                              GridLinesVisibility="Horizontal"
+                              HeadersVisibility="Column"
+                              CanUserResizeColumns="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Binding="{Binding Name}" Width="*"/>
+                            <DataGridTextColumn Binding="{Binding InodeNumber}" Width="100"/>
+                            <DataGridTextColumn Binding="{Binding FileTypeName}" Width="100"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </Border>
+
+            <!-- Superblock Info -->
+            <Border Grid.Row="1"
+                    BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="12"
+                    IsVisible="{Binding SuperblockInfo, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="{Binding Loc[SuperblockInformation]}" FontWeight="SemiBold" FontSize="14"/>
+                    <TextBlock Text="{Binding SuperblockInfo}" TextWrapping="Wrap"
+                               FontFamily="Cascadia Mono,Consolas,Courier New,monospace"
+                               FontSize="12"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>

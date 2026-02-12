@@ -1991,6 +1991,89 @@ namespace UFS2Tool
             }
         }
 
+        // --- Chmod support ---
+
+        /// <summary>
+        /// Change the permission bits of a file or directory at the given filesystem path.
+        /// Only the lower 12 bits (permissions) of the mode are changed; the file type bits are preserved.
+        /// </summary>
+        /// <param name="fsPath">Path in the UFS filesystem (e.g., "/path/to/file").</param>
+        /// <param name="mode">New permission mode (octal, e.g., 0x1FF for 0777).</param>
+        public void Chmod(string fsPath, ushort mode)
+        {
+            if (IsReadOnly)
+                throw new InvalidOperationException("Cannot chmod: image is opened read-only.");
+
+            uint inodeNumber = ResolvePath(fsPath);
+            var inode = ReadInode(inodeNumber);
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+            // Preserve file type bits (upper 4 bits) and replace permission bits (lower 12 bits)
+            inode.Mode = (ushort)((inode.Mode & 0xF000) | (mode & 0x0FFF));
+            inode.ChangeTime = now;
+            WriteInode(inodeNumber, inode);
+
+            Superblock.Time = now;
+            WriteSuperblock();
+            _stream.Flush();
+        }
+
+        /// <summary>
+        /// Recursively change the permission bits of all files and directories
+        /// in the entire filesystem image starting from the root.
+        /// </summary>
+        /// <param name="fileMode">Permission mode for regular files (e.g., 0x1A4 for 0644).</param>
+        /// <param name="dirMode">Permission mode for directories (e.g., 0x1ED for 0755).</param>
+        public void ChmodAll(ushort fileMode, ushort dirMode)
+        {
+            if (IsReadOnly)
+                throw new InvalidOperationException("Cannot chmod: image is opened read-only.");
+
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+            // Apply dirMode to root directory itself
+            var rootInode = ReadInode(Ufs2Constants.RootInode);
+            rootInode.Mode = (ushort)((rootInode.Mode & 0xF000) | (dirMode & 0x0FFF));
+            rootInode.ChangeTime = now;
+            WriteInode(Ufs2Constants.RootInode, rootInode);
+
+            ChmodRecursive(Ufs2Constants.RootInode, fileMode, dirMode, now);
+
+            Superblock.Time = now;
+            WriteSuperblock();
+            _stream.Flush();
+        }
+
+        /// <summary>
+        /// Recursively change permissions of all entries in a directory.
+        /// </summary>
+        private void ChmodRecursive(uint dirInodeNumber, ushort fileMode, ushort dirMode, long now)
+        {
+            var entries = ListDirectory(dirInodeNumber);
+
+            foreach (var entry in entries)
+            {
+                if (entry.Name == "." || entry.Name == "..")
+                    continue;
+
+                var inode = ReadInode(entry.Inode);
+
+                if (inode.IsDirectory)
+                {
+                    inode.Mode = (ushort)((inode.Mode & 0xF000) | (dirMode & 0x0FFF));
+                    inode.ChangeTime = now;
+                    WriteInode(entry.Inode, inode);
+                    ChmodRecursive(entry.Inode, fileMode, dirMode, now);
+                }
+                else
+                {
+                    inode.Mode = (ushort)((inode.Mode & 0xF000) | (fileMode & 0x0FFF));
+                    inode.ChangeTime = now;
+                    WriteInode(entry.Inode, inode);
+                }
+            }
+        }
+
         /// <summary>
         /// Get the parent path component from a filesystem path.
         /// </summary>

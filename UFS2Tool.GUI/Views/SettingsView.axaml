@@ -1,0 +1,37 @@
+<!-- Copyright (c) 2026, SvenGDK -->
+<!-- Licensed under the BSD 2-Clause License. See LICENSE file for details. -->
+
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UFS2Tool.GUI.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+             x:Class="UFS2Tool.GUI.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16" Spacing="16">
+
+            <!-- Settings Title -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="{Binding Loc[SettingsTitle]}" FontWeight="SemiBold" FontSize="18"/>
+
+                    <!-- Language Selection -->
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding Loc[Language]}" FontWeight="SemiBold" FontSize="15"/>
+                        <TextBlock Text="{Binding Loc[LanguageDescription]}"
+                                   FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"/>
+                        <ComboBox ItemsSource="{Binding AvailableLanguages}"
+                                  SelectedItem="{Binding SelectedLanguage}"
+                                  HorizontalAlignment="Left"
+                                  MinWidth="200"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

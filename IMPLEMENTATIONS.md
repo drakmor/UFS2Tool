@@ -261,6 +261,38 @@ ufs2tool delete <image-path> <fs-path>
 - Updates all filesystem metadata (CG counters, superblock free counts)
 - Parent directory link count updates for subdirectory deletion
 
+### `chmod` — Change file permissions
+
+Changes the permission mode of a file or directory inside a UFS1/UFS2 filesystem image, or applies permissions to the entire image recursively.
+
+**Synopsis:**
+```
+ufs2tool chmod [-R] <image-path> <mode> [fs-path | dir-mode]
+```
+
+**Features:**
+- Change permissions of a single file or directory by path
+- Recursively change permissions of all files and directories in the entire image (`-R`)
+- Separate file and directory mode support for recursive operation
+- Automatic directory execute bit derivation from file mode when not specified
+- Preserves file type bits (regular file, directory, symlink)
+- Updates inode change time (`ctime`) on permission changes
+- Supports both UFS1 and UFS2 filesystem formats
+- Octal mode parsing (e.g., `755`, `644`, `0777`)
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-R` | Apply recursively to entire image |
+
+**Examples:**
+```
+ufs2tool chmod myimage.img 755 /path/to/dir
+ufs2tool chmod myimage.img 644 /path/to/file.txt
+ufs2tool chmod -R myimage.img 644
+ufs2tool chmod -R myimage.img 644 755
+```
+
 ### `devinfo` — Show device information
 
 Displays Windows device information including total size and sector size for physical drives and volumes. Requires Administrator privileges.
@@ -295,8 +327,8 @@ ufs2tool mount_udf [-o options] [-v] <image-path> <drive-letter>
 - Requires Administrator privileges
 
 **Limitations:**
-- Creating new files or deleting files is not supported through the mount interface
 - Symlinks are presented as regular files containing the link target
+- File rename/move is not supported through the mount interface
 
 ### `umount_udf` — Unmount a UFS drive
 
@@ -337,6 +369,7 @@ ufs2tool umount_udf <drive-letter>
 - Block allocation from cylinder group free space for larger replacement files
 - File and directory addition with inode allocation, block allocation, and directory entry creation
 - File and directory deletion with recursive content removal, block deallocation, and inode freeing
+- Permission modification (chmod) for individual files/directories and recursive whole-image operations
 - Filesystem summary information display
 
 ### Superblock (`Ufs2Superblock`)
@@ -392,6 +425,10 @@ ufs2tool umount_udf <drive-letter>
 - Handles path normalization between Windows backslash and UFS forward slash conventions
 - Read-write support: modify existing file contents through standard Windows file operations
 - File attributes reflect mount mode (read-only vs. read-write)
+- Delete files and directories in read-write mode
+- Set file timestamps in read-write mode
+- Pattern-based file search (`FindFilesWithPattern`)
+- File security descriptor queries (returns `NotImplemented` for Unix-based permissions)
 
 ## Test Suite
 
@@ -409,4 +446,5 @@ The project includes a comprehensive test suite (`UFS2Tool.Tests`) with the foll
 | `ExtractTests` | Tests file extraction from UFS1/UFS2 filesystem images |
 | `ReplaceTests` | Tests file and directory replacement in UFS1/UFS2 filesystem images |
 | `AddDeleteTests` | Tests adding and deleting files and directories in UFS1/UFS2 filesystem images, including recursive operations, binary content preservation, and fsck validation |
+| `ChmodTests` | Tests chmod functionality: single file/directory permission changes, recursive whole-image chmod, file type bit preservation, read-only rejection, and fsck validation for both UFS1 and UFS2 |
 | `FsckUfsTests` | Tests fsck_ufs command: clean filesystem detection, CG magic/count validation, superblock count mismatches, populated filesystem checking, multi-CG images, and post-growfs/tunefs consistency |

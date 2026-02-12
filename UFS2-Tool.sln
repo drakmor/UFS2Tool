@@ -1,11 +1,13 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.0.31903.59
+# Visual Studio Version 18
+VisualStudioVersion = 18.3.11505.172 d18.3
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UFS2Tool", "UFS2Tool.csproj", "{CF1F50BE-64FF-41E7-85CB-2DBBDB4EA371}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UFS2Tool.Tests", "UFS2Tool.Tests\UFS2Tool.Tests.csproj", "{6FDD4489-3F85-4D80-9D69-83A1B0C81707}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UFS2Tool.GUI", "UFS2Tool.GUI\UFS2Tool.GUI.csproj", "{DAD5F6DA-1705-417A-ACB5-107E1E867145}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -36,13 +38,27 @@ Global
 		{6FDD4489-3F85-4D80-9D69-83A1B0C81707}.Debug|x86.ActiveCfg = Debug|Any CPU
 		{6FDD4489-3F85-4D80-9D69-83A1B0C81707}.Debug|x86.Build.0 = Debug|Any CPU
 		{6FDD4489-3F85-4D80-9D69-83A1B0C81707}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6FDD4489-3F85-4D80-9D69-83A1B0C81707}.Release|Any CPU.Build.0 = Release|Any CPU
 		{6FDD4489-3F85-4D80-9D69-83A1B0C81707}.Release|x64.ActiveCfg = Release|Any CPU
 		{6FDD4489-3F85-4D80-9D69-83A1B0C81707}.Release|x64.Build.0 = Release|Any CPU
 		{6FDD4489-3F85-4D80-9D69-83A1B0C81707}.Release|x86.ActiveCfg = Release|Any CPU
 		{6FDD4489-3F85-4D80-9D69-83A1B0C81707}.Release|x86.Build.0 = Release|Any CPU
+		{DAD5F6DA-1705-417A-ACB5-107E1E867145}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DAD5F6DA-1705-417A-ACB5-107E1E867145}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DAD5F6DA-1705-417A-ACB5-107E1E867145}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{DAD5F6DA-1705-417A-ACB5-107E1E867145}.Debug|x64.Build.0 = Debug|Any CPU
+		{DAD5F6DA-1705-417A-ACB5-107E1E867145}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{DAD5F6DA-1705-417A-ACB5-107E1E867145}.Debug|x86.Build.0 = Debug|Any CPU
+		{DAD5F6DA-1705-417A-ACB5-107E1E867145}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DAD5F6DA-1705-417A-ACB5-107E1E867145}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DAD5F6DA-1705-417A-ACB5-107E1E867145}.Release|x64.ActiveCfg = Release|Any CPU
+		{DAD5F6DA-1705-417A-ACB5-107E1E867145}.Release|x64.Build.0 = Release|Any CPU
+		{DAD5F6DA-1705-417A-ACB5-107E1E867145}.Release|x86.ActiveCfg = Release|Any CPU
+		{DAD5F6DA-1705-417A-ACB5-107E1E867145}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {29835529-3484-419B-BB26-55378B2D6BC9}
 	EndGlobalSection
 EndGlobal

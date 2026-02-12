@@ -1,0 +1,118 @@
+<!-- Copyright (c) 2026, SvenGDK -->
+<!-- Licensed under the BSD 2-Clause License. See LICENSE file for details. -->
+
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:UFS2Tool.GUI.ViewModels"
+        xmlns:views="using:UFS2Tool.GUI.Views"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1150" d:DesignHeight="750"
+        x:Class="UFS2Tool.GUI.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="UFS2 Tool — Filesystem Manager"
+        Width="1150" Height="750"
+        MinWidth="1150" MinHeight="750">
+
+    <Design.DataContext>
+        <vm:MainWindowViewModel/>
+    </Design.DataContext>
+
+    <DockPanel>
+        <!-- Header -->
+        <Border DockPanel.Dock="Top" Background="{DynamicResource SystemAccentColor}" Padding="20,12">
+            <StackPanel>
+                <TextBlock Text="{Binding Loc[AppTitle]}" FontSize="22" FontWeight="Bold"
+                           Foreground="White"/>
+                <TextBlock Text="{Binding Loc[AppSubtitle]}"
+                           FontSize="13" Foreground="#DDFFFFFF" Margin="0,2,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Output Log Panel (Bottom) -->
+        <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource SystemBaseMediumColor}"
+                BorderThickness="0,1,0,0" MaxHeight="350" MinHeight="48"
+                x:Name="OutputLogPanel">
+            <DockPanel>
+                <DockPanel DockPanel.Dock="Top" Margin="8,4">
+                    <TextBlock Text="{Binding Loc[OutputLog]}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="4">
+                        <Button Content="{Binding Loc[Detach]}" Click="DetachLog_Click"
+                                Padding="12,2" FontSize="12"/>
+                        <Button Content="{Binding Loc[Clear]}" Command="{Binding ClearLogCommand}"
+                                Padding="12,2" FontSize="12"/>
+                    </StackPanel>
+                </DockPanel>
+                <ListBox ItemsSource="{Binding OutputLog}" Margin="8,0,8,4"
+                         FontFamily="Cascadia Mono,Consolas,Courier New,monospace" FontSize="12"
+                         MaxHeight="300"
+                         x:Name="OutputLogList">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" TextWrapping="Wrap"/>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Border>
+
+        <!-- Tab Control (Center) -->
+        <TabControl Margin="8" SelectedIndex="{Binding SelectedTabIndex}">
+            <TabItem FontSize="20">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="💾" FontSize="20" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc[TabCreateFilesystem]}" FontSize="20" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding CreateFilesystemTab}"/>
+            </TabItem>
+            <TabItem FontSize="20">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="📂" FontSize="20" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc[TabFilesystemOperations]}" FontSize="20" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding FilesystemOperationsTab}"/>
+            </TabItem>
+            <TabItem FontSize="20">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="🔧" FontSize="20" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc[TabMaintenance]}" FontSize="20" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding MaintenanceTab}"/>
+            </TabItem>
+            <TabItem FontSize="20">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="💿" FontSize="20" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc[TabDeviceMount]}" FontSize="20" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding DeviceMountTab}"/>
+            </TabItem>
+            <TabItem FontSize="20">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="🎮" FontSize="20" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc[TabPS5]}" FontSize="20" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding PS5QuickCreateTab}"/>
+            </TabItem>
+            <TabItem FontSize="20">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="⚙️" FontSize="20" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc[TabSettings]}" FontSize="20" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding SettingsTab}"/>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>

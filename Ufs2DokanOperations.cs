@@ -345,37 +345,148 @@ namespace UFS2Tool
         public NtStatus FindFilesWithPattern(string fileName, string searchPattern,
             out IList<FileInformation> files, IDokanFileInfo info)
         {
+            // Get all files then filter by pattern
+            var result = FindFiles(fileName, out var allFiles, info);
+            if (result != DokanResult.Success)
+            {
+                files = [];
+                return result;
+            }
+
+            if (string.IsNullOrEmpty(searchPattern) || searchPattern == "*")
+            {
+                files = allFiles;
+                return DokanResult.Success;
+            }
+
             files = [];
-            // Delegate to FindFiles — Dokan will filter by pattern
-            return DokanResult.NotImplemented;
+            foreach (var file in allFiles)
+            {
+                if (DokanHelper.DokanIsNameInExpression(searchPattern, file.FileName, true))
+                {
+                    files.Add(file);
+                }
+            }
+            return DokanResult.Success;
         }
 
         public NtStatus SetFileAttributes(string fileName, FileAttributes attributes,
             IDokanFileInfo info)
         {
-            return DokanResult.AccessDenied;
+            if (_readOnly)
+                return DokanResult.AccessDenied;
+
+            // UFS does not use Windows file attributes; accept but ignore
+            var inode = TryResolvePath(fileName);
+            if (inode == null)
+                return DokanResult.FileNotFound;
+
+            return DokanResult.Success;
         }
 
         public NtStatus SetFileTime(string fileName, DateTime? creationTime,
             DateTime? lastAccessTime, DateTime? lastWriteTime, IDokanFileInfo info)
         {
-            return DokanResult.AccessDenied;
+            if (_readOnly)
+                return DokanResult.AccessDenied;
+
+            var inode = TryResolvePath(fileName);
+            if (inode == null)
+                return DokanResult.FileNotFound;
+
+            try
+            {
+                lock (_lock)
+                {
+                    var inodeData = _image.ReadInode(inode.Value);
+
+                    if (creationTime.HasValue && creationTime.Value != DateTime.MinValue)
+                        inodeData.CreateTime = new DateTimeOffset(creationTime.Value).ToUnixTimeSeconds();
+                    if (lastAccessTime.HasValue && lastAccessTime.Value != DateTime.MinValue)
+                        inodeData.AccessTime = new DateTimeOffset(lastAccessTime.Value).ToUnixTimeSeconds();
+                    if (lastWriteTime.HasValue && lastWriteTime.Value != DateTime.MinValue)
+                        inodeData.ModTime = new DateTimeOffset(lastWriteTime.Value).ToUnixTimeSeconds();
+
+                    inodeData.ChangeTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    _image.WriteInode(inode.Value, inodeData);
+                }
+                return DokanResult.Success;
+            }
+            catch (InvalidOperationException)
+            {
+                return DokanResult.AccessDenied;
+            }
         }
 
         public NtStatus DeleteFile(string fileName, IDokanFileInfo info)
         {
-            return DokanResult.AccessDenied;
+            if (_readOnly)
+                return DokanResult.AccessDenied;
+
+            var inode = TryResolvePath(fileName);
+            if (inode == null)
+                return DokanResult.FileNotFound;
+
+            try
+            {
+                lock (_lock)
+                {
+                    var inodeData = _image.ReadInode(inode.Value);
+                    if (!inodeData.IsRegularFile && !inodeData.IsSymlink)
+                        return DokanResult.AccessDenied;
+
+                    string ufsPath = NormalizePath(fileName);
+                    _image.Delete(ufsPath);
+                }
+                return DokanResult.Success;
+            }
+            catch (InvalidOperationException)
+            {
+                return DokanResult.AccessDenied;
+            }
+            catch (IOException)
+            {
+                return DokanResult.AccessDenied;
+            }
         }
 
         public NtStatus DeleteDirectory(string fileName, IDokanFileInfo info)
         {
-            return DokanResult.AccessDenied;
+            if (_readOnly)
+                return DokanResult.AccessDenied;
+
+            var inode = TryResolvePath(fileName);
+            if (inode == null)
+                return DokanResult.PathNotFound;
+
+            try
+            {
+                lock (_lock)
+                {
+                    var inodeData = _image.ReadInode(inode.Value);
+                    if (!inodeData.IsDirectory)
+                        return DokanResult.AccessDenied;
+
+                    string ufsPath = NormalizePath(fileName);
+                    _image.Delete(ufsPath);
+                }
+                return DokanResult.Success;
+            }
+            catch (InvalidOperationException)
+            {
+                return DokanResult.AccessDenied;
+            }
+            catch (IOException)
+            {
+                return DokanResult.AccessDenied;
+            }
         }
 
         public NtStatus MoveFile(string oldName, string newName, bool replace,
             IDokanFileInfo info)
         {
-            return DokanResult.AccessDenied;
+            // MoveFile/rename is not supported by the UFS image API
+            return DokanResult.NotImplemented;
         }
 
         public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info)
@@ -468,14 +579,25 @@ namespace UFS2Tool
         public NtStatus GetFileSecurity(string fileName, out FileSystemSecurity? security,
             AccessControlSections sections, IDokanFileInfo info)
         {
+            // UFS uses Unix permissions, not Windows ACLs.
+            // Return a default empty security descriptor so that Windows can display properties.
             security = null;
+
+            var inode = TryResolvePath(fileName);
+            if (inode == null)
+                return DokanResult.FileNotFound;
+
             return DokanResult.NotImplemented;
         }
 
         public NtStatus SetFileSecurity(string fileName, FileSystemSecurity security,
             AccessControlSections sections, IDokanFileInfo info)
         {
-            return DokanResult.AccessDenied;
+            if (_readOnly)
+                return DokanResult.AccessDenied;
+
+            // UFS uses Unix permissions; Windows ACL changes are not applicable
+            return DokanResult.NotImplemented;
         }
 
         public NtStatus Mounted(string mountPoint, IDokanFileInfo info)

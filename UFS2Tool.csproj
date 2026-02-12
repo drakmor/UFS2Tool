@@ -7,13 +7,14 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
-    <Version>2.0.0</Version>
+    <Version>2.5.0</Version>
     <Authors>SvenGDK</Authors>
     <Description>UFS2 Tool — FreeBSD UFS1/UFS2 Filesystem Manager for Windows</Description>
     <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/SvenGDK/UFS2Tool</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <Copyright>SvenGDK</Copyright>
+    <Configurations>Debug;Release</Configurations>
   </PropertyGroup>
   <!-- Request admin elevation via app manifest (Windows only) -->
   <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
@@ -21,6 +22,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="UFS2Tool.Tests/**" />
+    <Compile Remove="UFS2Tool.GUI/**" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="DokanNet" Version="2.0.1" />
