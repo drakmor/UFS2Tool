@@ -36,6 +36,7 @@ namespace Ufs2Tool
                     "replace" => HandleReplace(args),
                     "add" => HandleAdd(args),
                     "delete" => HandleDelete(args),
+                    "rename" => HandleRename(args),
                     "chmod" => HandleChmod(args),
                     "devinfo" => HandleDevInfo(args),
                     "mount_udf" => HandleMountUdf(args),
@@ -772,7 +773,6 @@ namespace Ufs2Tool
             if (i + 1 >= args.Length)
             {
                 Console.Error.WriteLine($"Error: {args[i]} requires a {name} value.");
-                PrintNewFsUsage();
                 return false;
             }
             if (!int.TryParse(args[i + 1], out value))
@@ -790,7 +790,6 @@ namespace Ufs2Tool
             if (i + 1 >= args.Length)
             {
                 Console.Error.WriteLine($"Error: {args[i]} requires a {name} value.");
-                PrintNewFsUsage();
                 return false;
             }
             if (!long.TryParse(args[i + 1], out value))
@@ -808,7 +807,6 @@ namespace Ufs2Tool
             if (i + 1 >= args.Length)
             {
                 Console.Error.WriteLine($"Error: {args[i]} requires a {name} value.");
-                PrintNewFsUsage();
                 return false;
             }
             value = args[i + 1];
@@ -1615,47 +1613,56 @@ namespace Ufs2Tool
             if (string.IsNullOrWhiteSpace(input))
                 return false;
 
-            string trimmed = input.Trim();
-            if (trimmed.Length == 0)
-                return false;
+            // Handle product notation (e.g., "512x1024")
+            string[] factors = input.Split('x', StringSplitOptions.RemoveEmptyEntries);
+            long product = 1;
 
-            char lastChar = char.ToLower(trimmed[^1]);
-            string numPart;
-            long multiplier;
-
-            if (char.IsLetter(lastChar))
+            foreach (string factor in factors)
             {
-                numPart = trimmed[..^1];
-                multiplier = lastChar switch
-                {
-                    'b' => 1,
-                    'k' => 1024,
-                    'm' => 1024 * 1024,
-                    'g' => 1024L * 1024 * 1024,
-                    't' => 1024L * 1024 * 1024 * 1024,
-                    _ => -1
-                };
-                if (multiplier < 0)
+                string trimmed = factor.Trim();
+                if (trimmed.Length == 0)
                     return false;
-            }
-            else
-            {
-                numPart = trimmed;
-                multiplier = 512; // default: sectors
+
+                long multiplier;
+                string numPart;
+
+                char lastChar = char.ToLower(trimmed[^1]);
+
+                if (char.IsLetter(lastChar))
+                {
+                    numPart = trimmed[..^1];
+                    multiplier = lastChar switch
+                    {
+                        'b' => 1,
+                        'k' => 1024,
+                        'm' => 1024 * 1024,
+                        'g' => 1024L * 1024 * 1024,
+                        't' => 1024L * 1024 * 1024 * 1024,
+                        _ => -1
+                    };
+                    if (multiplier < 0)
+                        return false;
+                }
+                else
+                {
+                    numPart = trimmed;
+                    multiplier = factors.Length > 1 ? 1 : 512; // default: sectors only for single values
+                }
+
+                if (!long.TryParse(numPart, out long val) || val <= 0)
+                    return false;
+
+                try
+                {
+                    checked { product *= val * multiplier; }
+                }
+                catch (OverflowException)
+                {
+                    return false;
+                }
             }
 
-            if (!long.TryParse(numPart, out long val) || val <= 0)
-                return false;
-
-            try
-            {
-                checked { result = val * multiplier; }
-            }
-            catch (OverflowException)
-            {
-                return false;
-            }
-
+            result = product;
             return result > 0;
         }
 
@@ -2003,6 +2010,35 @@ namespace Ufs2Tool
             image.Delete(fsPath);
 
             Console.WriteLine($"Deleted '{fsPath}'.");
+            return 0;
+        }
+
+        /// <summary>
+        /// Rename a file or directory inside a UFS1/UFS2 filesystem image.
+        /// </summary>
+        static int HandleRename(string[] args)
+        {
+            if (args.Length < 4)
+            {
+                Console.Error.WriteLine("Usage: ufs2tool rename <image-path> <fs-path> <new-name>");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("  Rename a file:");
+                Console.Error.WriteLine("    ufs2tool rename myimage.img /path/to/old.txt newname.txt");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("  Rename a directory:");
+                Console.Error.WriteLine("    ufs2tool rename myimage.img /path/to/olddir newdir");
+                return 1;
+            }
+
+            string imagePath = args[1];
+            string fsPath = args[2];
+            string newName = args[3];
+
+            using var image = new Ufs2Image(imagePath, readOnly: false);
+
+            image.Rename(fsPath, newName);
+
+            Console.WriteLine($"Renamed '{fsPath}' to '{newName}'.");
             return 0;
         }
 
@@ -2692,6 +2728,9 @@ namespace Ufs2Tool
                   delete  <image-path> <fs-path>
                           Delete a file or directory from a UFS1/UFS2 filesystem image.
                           If fs-path is a directory, deletes all contents recursively.
+                  rename  <image-path> <fs-path> <new-name>
+                          Rename a file or directory in a UFS1/UFS2 filesystem image.
+                          The entry stays in the same parent directory.
                   chmod   [-R] <image-path> <mode> [fs-path]
                           Change permissions of a file or directory in a UFS image.
                           With -R, apply to entire image (files and directories).
@@ -2737,6 +2776,8 @@ namespace Ufs2Tool
                   ufs2tool add myimage.img /newdir ./local/dir
                   ufs2tool delete myimage.img /path/to/file.txt
                   ufs2tool delete myimage.img /path/to/dir
+                  ufs2tool rename myimage.img /path/to/old.txt newname.txt
+                  ufs2tool rename myimage.img /path/to/olddir newdir
                   ufs2tool chmod myimage.img 755 /path/to/dir
                   ufs2tool chmod -R myimage.img 644
                   ufs2tool chmod -R myimage.img 644 755

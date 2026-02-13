@@ -38,9 +38,10 @@ public partial class PS5QuickCreateView : UserControl
 
         var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            DefaultExtension = "img",
+            DefaultExtension = "ffpkg",
             FileTypeChoices = new[]
             {
+                new FilePickerFileType("ffpkg files") { Patterns = new[] { "*.ffpkg" } },
                 new FilePickerFileType("Image files") { Patterns = new[] { "*.img" } },
                 new FilePickerFileType("All files") { Patterns = new[] { "*" } },
             },

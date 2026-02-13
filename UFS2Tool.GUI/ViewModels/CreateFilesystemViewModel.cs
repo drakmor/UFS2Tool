@@ -7,6 +7,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using UFS2Tool;
+using UFS2Tool.GUI.Services;
 namespace UFS2Tool.GUI.ViewModels;
 
 public partial class CreateFilesystemViewModel : ViewModelBase
@@ -97,11 +98,24 @@ public partial class CreateFilesystemViewModel : ViewModelBase
 
         IsRunning = true;
         _outputLog.Add($"[NewFS] Creating UFS{FilesystemFormat} filesystem: {ImagePath}");
+        _outputLog.Add($"[NewFS] Parameters: BlockSize={BlockSize}, FragSize={FragmentSize}, SectorSize={SectorSize}");
+        _outputLog.Add($"[NewFS] Options: MinFree={MinFreePercent}%, Optimization={OptimizationPreference ?? "time"}, SoftUpdates={SoftUpdates}, Journal={SoftUpdatesJournal}, TRIM={TrimEnabled}");
+        if (!string.IsNullOrWhiteSpace(VolumeName))
+            _outputLog.Add($"[NewFS] Volume name: {VolumeName}");
+        if (!string.IsNullOrWhiteSpace(InputDirectory))
+            _outputLog.Add($"[NewFS] Input directory: {InputDirectory}");
+        else
+            _outputLog.Add($"[NewFS] Image size: {SizeInMB} MB");
+        if (DryRun)
+            _outputLog.Add("[NewFS] Dry run mode — no changes will be written.");
+        if (EraseContents)
+            _outputLog.Add("[NewFS] Erase contents enabled.");
 
         try
         {
             await Task.Run(() =>
             {
+                using var logWriter = new LogTextWriter(_outputLog);
                 var creator = new Ufs2ImageCreator
                 {
                     FilesystemFormat = FilesystemFormat,
@@ -118,6 +132,8 @@ public partial class CreateFilesystemViewModel : ViewModelBase
                     TrimEnabled = TrimEnabled,
                     EraseContents = EraseContents,
                     DryRun = DryRun,
+                    Output = logWriter,
+                    ErrorOutput = logWriter,
                 };
 
                 if (!string.IsNullOrWhiteSpace(InputDirectory))

@@ -413,6 +413,19 @@ namespace UFS2Tool
             // 0x060
             sb.FragShift = br.ReadInt32();
 
+            // 0x064 - fs_fsbtodb
+            int fsbtodb = br.ReadInt32();
+            // Recover sector size from fs_fsbtodb = log2(fsize / sectorsize)
+            // => sectorsize = fsize / (1 << fsbtodb)
+            // Guard: fsbtodb < 30 prevents (1 << fsbtodb) overflow;
+            // computed >= MinSectorSize (512) ensures a valid sector size.
+            if (fsbtodb >= 0 && fsbtodb < 30 && sb.FSize > 0)
+            {
+                int computed = sb.FSize / (1 << fsbtodb);
+                if (computed >= Ufs2Constants.DefaultSectorSize)
+                    sb.SectorSize = computed;
+            }
+
             // 0x080
             ms.Position = 0x80;
             sb.Optimization = br.ReadInt32();

@@ -15,9 +15,7 @@ namespace UFS2Tool
     {
         public ushort Mode { get; set; }           // di_mode - File type and permissions
         public short NLink { get; set; }           // di_nlink - Number of hard links
-        // UFS1 uses the old uid/gid (16-bit in old layout, but we use 32-bit fields)
-        public uint Uid { get; set; }              // di_uid
-        public uint Gid { get; set; }              // di_gid
+        public uint DirDepth { get; set; }         // di_freelink/di_dirdepth (union at offset 4)
         public long Size { get; set; }             // di_size - File size in bytes (64-bit)
         public int AccessTime { get; set; }        // di_atime - 32-bit timestamp
         public int ATimeNsec { get; set; }         // di_atimensec
@@ -30,7 +28,8 @@ namespace UFS2Tool
         public uint Flags { get; set; }            // di_flags
         public int Blocks { get; set; }            // di_blocks - 512-byte blocks
         public int Generation { get; set; }        // di_gen
-        public uint OldFlags { get; set; }         // di_ouid (old flags area)
+        public uint Uid { get; set; }              // di_uid (at offset 112)
+        public uint Gid { get; set; }              // di_gid (at offset 116)
 
         public bool IsDirectory => (Mode & 0xF000) == Ufs2Constants.IfDir;
         public bool IsRegularFile => (Mode & 0xF000) == Ufs2Constants.IfReg;
@@ -46,8 +45,7 @@ namespace UFS2Tool
 
             writer.Write(Mode);              // 0x00 (2 bytes)
             writer.Write(NLink);             // 0x02 (2 bytes)
-            writer.Write((short)0);          // 0x04 old_uid placeholder (2 bytes)
-            writer.Write((short)0);          // 0x06 old_gid placeholder (2 bytes)
+            writer.Write(DirDepth);          // 0x04 di_freelink/di_dirdepth (4 bytes)
             writer.Write(Size);              // 0x08 (8 bytes)
             writer.Write(AccessTime);        // 0x10 (4 bytes)
             writer.Write(ATimeNsec);         // 0x14 (4 bytes)
@@ -89,8 +87,7 @@ namespace UFS2Tool
                 Mode = reader.ReadUInt16(),
                 NLink = reader.ReadInt16()
             };
-            reader.ReadInt16(); // old_uid
-            reader.ReadInt16(); // old_gid
+            inode.DirDepth = reader.ReadUInt32(); // di_freelink/di_dirdepth
             inode.Size = reader.ReadInt64();
             inode.AccessTime = reader.ReadInt32();
             inode.ATimeNsec = reader.ReadInt32();

@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
-    <Version>2.5.0</Version>
+    <Version>3.0.0</Version>
     <Authors>SvenGDK</Authors>
     <Description>UFS2 Tool — FreeBSD UFS1/UFS2 Filesystem Manager for Windows</Description>
     <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>

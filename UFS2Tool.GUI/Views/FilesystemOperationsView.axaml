@@ -40,6 +40,8 @@
                         IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
                 <Button Content="{Binding Loc[Delete]}" Command="{Binding DeleteCommand}"
                         IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[Rename]}" Command="{Binding RenameCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
                 <Button Content="{Binding Loc[Replace]}" Command="{Binding ReplaceCommand}"
                         IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
                 <Button Content="{Binding Loc[Chmod]}" Command="{Binding ChmodCommand}"
@@ -51,7 +53,7 @@
         <Border DockPanel.Dock="Top"
                 BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
                 CornerRadius="4" Padding="16" Margin="0,0,0,12">
-            <Grid ColumnDefinitions="140,*,16,140,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="8">
+            <Grid ColumnDefinitions="140,*,16,140,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="8">
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Loc[LocalPath]}" VerticalAlignment="Center"/>
                 <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding LocalPath}"
                          Watermark="{Binding Loc[LocalPathWatermark]}"/>
@@ -67,6 +69,10 @@
                 <CheckBox Grid.Row="1" Grid.Column="3" Grid.ColumnSpan="2"
                           Content="{Binding Loc[RecursiveChmod]}" IsChecked="{Binding ChmodRecursive}"
                           VerticalAlignment="Center"/>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Loc[NewName]}" VerticalAlignment="Center"/>
+                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding NewName}"
+                         Watermark="{Binding Loc[NewNameWatermark]}"/>
             </Grid>
         </Border>
 

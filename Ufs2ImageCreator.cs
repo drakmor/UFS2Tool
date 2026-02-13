@@ -88,6 +88,19 @@ namespace UFS2Tool
         public string InputDirectory { get; set; } = "";
 
         /// <summary>
+        /// Optional TextWriter for log output. When set, log messages are written here
+        /// instead of to Console.Out. This allows GUI applications to capture the output
+        /// that would normally go to the console during image creation.
+        /// </summary>
+        public TextWriter? Output { get; set; }
+
+        /// <summary>
+        /// Optional TextWriter for error/warning output. When set, warning messages are
+        /// written here instead of to Console.Error.
+        /// </summary>
+        public TextWriter? ErrorOutput { get; set; }
+
+        /// <summary>
         /// Get the on-disk inode size for the selected filesystem format.
         /// </summary>
         private int InodeSizeForFormat =>
@@ -210,7 +223,7 @@ namespace UFS2Tool
             // Override sector size with the physical sector size of the device
             if (physicalSectorSize > SectorSize)
             {
-                Console.WriteLine(
+                (Output ?? Console.Out).WriteLine(
                     $"Note: Device sector size ({physicalSectorSize}) is larger than " +
                     $"configured ({SectorSize}). Using device sector size.");
                 SectorSize = physicalSectorSize;
@@ -230,9 +243,9 @@ namespace UFS2Tool
                 totalSizeBytes = deviceSize;
             }
 
-            Console.WriteLine($"Device:      {devicePath}");
-            Console.WriteLine($"Device size: {deviceSize:N0} bytes ({deviceSize / (1024 * 1024)} MB)");
-            Console.WriteLine($"Sector size: {SectorSize} bytes");
+            (Output ?? Console.Out).WriteLine($"Device:      {devicePath}");
+            (Output ?? Console.Out).WriteLine($"Device size: {deviceSize:N0} bytes ({deviceSize / (1024 * 1024)} MB)");
+            (Output ?? Console.Out).WriteLine($"Sector size: {SectorSize} bytes");
 
             ValidateParameters();
 
@@ -244,14 +257,14 @@ namespace UFS2Tool
             // Align total size down to fragment boundary
             totalSizeBytes = (totalSizeBytes / FragmentSize) * FragmentSize;
 
-            Console.WriteLine($"Usable size: {totalSizeBytes:N0} bytes (aligned to {FragmentSize}-byte fragments)");
-            Console.WriteLine();
+            (Output ?? Console.Out).WriteLine($"Usable size: {totalSizeBytes:N0} bytes (aligned to {FragmentSize}-byte fragments)");
+            (Output ?? Console.Out).WriteLine();
 
             PrintNewfsParameters(totalSizeBytes);
 
             if (DryRun)
             {
-                Console.WriteLine("Dry run (-N): filesystem was NOT created.");
+                (Output ?? Console.Out).WriteLine("Dry run (-N): filesystem was NOT created.");
                 return;
             }
 
@@ -262,18 +275,18 @@ namespace UFS2Tool
             // Erase device if -E flag set
             if (EraseContents)
             {
-                Console.WriteLine("Erasing device contents...");
+                (Output ?? Console.Out).WriteLine("Erasing device contents...");
                 long eraseSize = Math.Min(totalSizeBytes, deviceSize);
                 long eraseAligned = (eraseSize / SectorSize) * SectorSize;
                 aligned.WriteZeros(0, eraseAligned);
-                Console.WriteLine("Erase complete.");
+                (Output ?? Console.Out).WriteLine("Erase complete.");
             }
 
             // Build the filesystem structures in memory, then write sector-aligned
             WriteFilesystem(aligned, totalSizeBytes);
 
             aligned.Flush();
-            Console.WriteLine("Filesystem written successfully to device.");
+            (Output ?? Console.Out).WriteLine("Filesystem written successfully to device.");
         }
 
         /// <summary>
@@ -300,7 +313,7 @@ namespace UFS2Tool
 
             if (DryRun)
             {
-                Console.WriteLine("Dry run (-N): filesystem was NOT created.");
+                (Output ?? Console.Out).WriteLine("Dry run (-N): filesystem was NOT created.");
                 return;
             }
 
@@ -331,17 +344,17 @@ namespace UFS2Tool
             fragsPerGroup = (fragsPerGroup / fragsPerBlock) * fragsPerBlock;
 
             string formatStr = (FilesystemFormat == 1) ? "UFS1" : "UFS2";
-            Console.WriteLine($"  Format:        {formatStr} (-O {FilesystemFormat})");
-            Console.WriteLine($"  Block size:    {BlockSize} bytes (-b)");
-            Console.WriteLine($"  Fragment size: {FragmentSize} bytes (-f)");
-            Console.WriteLine($"  Sector size:   {SectorSize} bytes (-S)");
-            Console.WriteLine($"  Inode size:    {inodeSize} bytes");
-            Console.WriteLine($"  Total size:    {totalSizeBytes:N0} bytes ({totalSizeBytes / (1024 * 1024)} MB)");
-            Console.WriteLine($"  Cylinder groups: {numCylGroups}");
-            Console.WriteLine($"  Frags/group:   {fragsPerGroup}");
-            Console.WriteLine($"  Inodes/group:  {inodesPerGroup}");
-            Console.WriteLine($"  Min free:      {MinFreePercent}% (-m)");
-            Console.WriteLine($"  Optimization:  {OptimizationPreference} (-o)");
+            (Output ?? Console.Out).WriteLine($"  Format:        {formatStr} (-O {FilesystemFormat})");
+            (Output ?? Console.Out).WriteLine($"  Block size:    {BlockSize} bytes (-b)");
+            (Output ?? Console.Out).WriteLine($"  Fragment size: {FragmentSize} bytes (-f)");
+            (Output ?? Console.Out).WriteLine($"  Sector size:   {SectorSize} bytes (-S)");
+            (Output ?? Console.Out).WriteLine($"  Inode size:    {inodeSize} bytes");
+            (Output ?? Console.Out).WriteLine($"  Total size:    {totalSizeBytes:N0} bytes ({totalSizeBytes / (1024 * 1024)} MB)");
+            (Output ?? Console.Out).WriteLine($"  Cylinder groups: {numCylGroups}");
+            (Output ?? Console.Out).WriteLine($"  Frags/group:   {fragsPerGroup}");
+            (Output ?? Console.Out).WriteLine($"  Inodes/group:  {inodesPerGroup}");
+            (Output ?? Console.Out).WriteLine($"  Min free:      {MinFreePercent}% (-m)");
+            (Output ?? Console.Out).WriteLine($"  Optimization:  {OptimizationPreference} (-o)");
 
             int flags = ComputeFlags();
             if (flags != 0)
@@ -352,13 +365,13 @@ namespace UFS2Tool
                 if ((flags & Ufs2Constants.FsGjournal) != 0) flagNames.Add("GJOURNAL");
                 if ((flags & Ufs2Constants.FsMultilabel) != 0) flagNames.Add("MULTILABEL");
                 if ((flags & Ufs2Constants.FsTrim) != 0) flagNames.Add("TRIM");
-                Console.WriteLine($"  Flags:         {string.Join(", ", flagNames)}");
+                (Output ?? Console.Out).WriteLine($"  Flags:         {string.Join(", ", flagNames)}");
             }
 
             if (!string.IsNullOrEmpty(VolumeName))
-                Console.WriteLine($"  Volume name:   {VolumeName} (-L)");
+                (Output ?? Console.Out).WriteLine($"  Volume name:   {VolumeName} (-L)");
 
-            Console.WriteLine();
+            (Output ?? Console.Out).WriteLine();
         }
 
         /// <summary>
@@ -683,12 +696,12 @@ namespace UFS2Tool
                 if (numCylGroups > 10 && (cg + 1) % (numCylGroups / 10) == 0)
                 {
                     int pct = (int)((cg + 1) * 100L / numCylGroups);
-                    Console.Write($"\r  Writing cylinder groups... {pct}%");
+                    (Output ?? Console.Out).Write($"\r  Writing cylinder groups... {pct}%");
                 }
             }
 
             if (numCylGroups > 10)
-                Console.WriteLine($"\r  Writing cylinder groups... 100%");
+                (Output ?? Console.Out).WriteLine($"\r  Writing cylinder groups... 100%");
 
             // Write completed CG summary area at CsAddr (CG 0 data region)
             target.WriteAligned(csSummaryData, (long)dblkno * FragmentSize);
@@ -1101,9 +1114,9 @@ namespace UFS2Tool
             var rng = new Random(cgIndex + 1);
 
             // di_gen field offsets within the on-disk inode structure:
-            // UFS1 (128-byte inode): di_gen at offset 0x60
-            // UFS2 (256-byte inode): di_gen at offset 0x50
-            const int Ufs1InodeGenOffset = 0x60;
+            // UFS1 (128-byte inode): di_gen at offset 0x6C (108)
+            // UFS2 (256-byte inode): di_gen at offset 0x50 (80)
+            const int Ufs1InodeGenOffset = 0x6C;
             const int Ufs2InodeGenOffset = 0x50;
 
             for (int i = 0; i < inodesInCg; i++)
@@ -1549,10 +1562,10 @@ namespace UFS2Tool
                         totalSizeBytes = AlignUp(requiredBytes, FragmentSize);
                 }
 
-                Console.WriteLine($"  Input directory: {directoryPath}");
-                Console.WriteLine($"  Directory size:  {dirSize:N0} bytes ({dirSize / (1024.0 * 1024):F2} MB)");
-                Console.WriteLine($"  Auto-sized to:   {totalSizeBytes:N0} bytes ({totalSizeBytes / (1024 * 1024)} MB)");
-                Console.WriteLine();
+                (Output ?? Console.Out).WriteLine($"  Input directory: {directoryPath}");
+                (Output ?? Console.Out).WriteLine($"  Directory size:  {dirSize:N0} bytes ({dirSize / (1024.0 * 1024):F2} MB)");
+                (Output ?? Console.Out).WriteLine($"  Auto-sized to:   {totalSizeBytes:N0} bytes ({totalSizeBytes / (1024 * 1024)} MB)");
+                (Output ?? Console.Out).WriteLine();
             }
 
             // Step 2: Create an empty UFS filesystem
@@ -1621,7 +1634,9 @@ namespace UFS2Tool
 
             // ── Step 1: ffs_size_dir — walk tree, compute exact data size + inodes ──
             var (dirSize, diskSize, totalEntries) = CalculateDirectorySizes(directoryPath, BlockSize, FragmentSize, FilesystemFormat);
-            long totalInodes = totalEntries + Ufs2Constants.RootInode; // include reserved inodes 0,1 + root
+            // Each entry needs one inode, plus 3 reserved inodes
+            // (inode 0, inode 1, and the root directory inode 2).
+            long totalInodes = totalEntries + 3;
             long totalSize = diskSize;
 
             // ── Step 2: Add requested free blocks/files slop ──
@@ -1757,25 +1772,25 @@ namespace UFS2Tool
                 throw new ArgumentException(
                     $"Image size ({totalSize:N0} bytes) exceeds maximum size ({maximumSize:N0} bytes).");
 
-            Console.WriteLine($"  Calculated size of '{imagePath}': {totalSize:N0} bytes, {totalInodes} inodes");
+            (Output ?? Console.Out).WriteLine($"  Calculated size of '{imagePath}': {totalSize:N0} bytes, {totalInodes} inodes");
 
             // ── Step 9: Create image and populate ──
-            Console.WriteLine($"  Input directory: {directoryPath}");
-            Console.WriteLine($"  Directory size:  {dirSize:N0} bytes ({dirSize / (1024.0 * 1024):F2} MB)");
-            Console.WriteLine($"  Image size:      {totalSize:N0} bytes ({totalSize / (1024 * 1024)} MB)");
+            (Output ?? Console.Out).WriteLine($"  Input directory: {directoryPath}");
+            (Output ?? Console.Out).WriteLine($"  Directory size:  {dirSize:N0} bytes ({dirSize / (1024.0 * 1024):F2} MB)");
+            (Output ?? Console.Out).WriteLine($"  Image size:      {totalSize:N0} bytes ({totalSize / (1024 * 1024)} MB)");
             if (autoDensity)
-                Console.WriteLine($"  Auto density:    {BytesPerInode:N0} bytes/inode");
+                (Output ?? Console.Out).WriteLine($"  Auto density:    {BytesPerInode:N0} bytes/inode");
             if (autoMaxBpcg)
-                Console.WriteLine($"  Auto maxbpcg:    {BlocksPerCylGroup:N0} blocks/CG");
-            Console.WriteLine();
+                (Output ?? Console.Out).WriteLine($"  Auto maxbpcg:    {BlocksPerCylGroup:N0} blocks/CG");
+            (Output ?? Console.Out).WriteLine();
 
             CreateImage(imagePath, totalSize);
 
             if (!DryRun)
             {
-                Console.WriteLine($"  Populating '{imagePath}'");
+                (Output ?? Console.Out).WriteLine($"  Populating '{imagePath}'");
                 PopulateFromDirectory(imagePath, directoryPath);
-                Console.WriteLine($"  Image '{imagePath}' complete");
+                (Output ?? Console.Out).WriteLine($"  Image '{imagePath}' complete");
             }
 
             return totalSize;
@@ -1885,7 +1900,7 @@ namespace UFS2Tool
                 if (!force && percent == lastProgressPercent)
                     return;
 
-                Console.Write(
+                (Output ?? Console.Out).Write(
                     $"\r  Adding files to image... {percent,3}% " +
                     $"({displayedCompletedFiles:N0}/{totalFiles:N0} files, {FormatBytes(copiedBytes)}/{FormatBytes(totalBytes)})");
                 lastProgressPercent = percent;
@@ -1958,10 +1973,10 @@ namespace UFS2Tool
                 if (remainingBytes < 0)
                     remainingBytes = 0;
                 ReportCopyProgress(filesWritten, remainingBytes, force: true);
-                Console.WriteLine();
+                (Output ?? Console.Out).WriteLine();
             }
 
-            Console.WriteLine($"  Populated image with {filesWritten} file(s) and {dirCount} directory(ies) from: {directoryPath}");
+            (Output ?? Console.Out).WriteLine($"  Populated image with {filesWritten} file(s) and {dirCount} directory(ies) from: {directoryPath}");
         }
 
         /// <summary>

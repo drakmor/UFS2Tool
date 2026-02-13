@@ -50,6 +50,7 @@ public partial class DeviceMountViewModel : ViewModelBase
             return;
         }
         IsRunning = true;
+        _outputLog.Add($"[DevInfo] Querying device information for '{DevicePath}'...");
         try
         {
             await Task.Run(() =>
@@ -59,7 +60,10 @@ public partial class DeviceMountViewModel : ViewModelBase
                 int sectorSize = UFS2Tool.DriveIO.GetSectorSize(DevicePath);
 #pragma warning restore CA1416
                 long sectorCount = size / sectorSize;
-                string text = $"Device: {DevicePath}\nSize: {size:N0} bytes\nSectors: {sectorCount:N0}\nSector Size: {sectorSize}";
+                double sizeMB = size / (1024.0 * 1024.0);
+                double sizeGB = sizeMB / 1024.0;
+                string humanSize = sizeGB >= 1.0 ? $"{sizeGB:F2} GB" : $"{sizeMB:F2} MB";
+                string text = $"Device: {DevicePath}\nSize: {size:N0} bytes ({humanSize})\nSectors: {sectorCount:N0}\nSector Size: {sectorSize}";
                 DeviceInfoText = text;
                 _outputLog.Add($"[DevInfo] {text}");
             });
@@ -72,48 +76,46 @@ public partial class DeviceMountViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private async Task MountAsync()
+    private Task MountAsync()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             _outputLog.Add("[Mount] Mounting is only available on Windows (requires Dokan driver).");
-            return;
+            return Task.CompletedTask;
         }
         if (string.IsNullOrWhiteSpace(ImagePath))
         {
             _outputLog.Add("[Error] Please specify an image file path.");
-            return;
+            return Task.CompletedTask;
         }
         if (string.IsNullOrWhiteSpace(MountDriveLetter))
         {
             _outputLog.Add("[Error] Please specify a drive letter.");
-            return;
+            return Task.CompletedTask;
         }
 
-        IsRunning = true;
         _outputLog.Add($"[Mount] Mounting '{ImagePath}' as {MountDriveLetter}:\\ (Read{(MountReadWrite ? "/Write" : " Only")})...");
         _outputLog.Add("[Mount] Note: Mounting requires the Dokan driver to be installed.");
         _outputLog.Add("[Mount] Use the CLI tool for mount operations: UFS2Tool mount_udf <image> <drive-letter>");
 
-        await Task.CompletedTask;
-        IsRunning = false;
+        return Task.CompletedTask;
     }
 
     [RelayCommand]
-    private async Task UnmountAsync()
+    private Task UnmountAsync()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             _outputLog.Add("[Unmount] Unmounting is only available on Windows.");
-            return;
+            return Task.CompletedTask;
         }
         if (string.IsNullOrWhiteSpace(MountDriveLetter))
         {
             _outputLog.Add("[Error] Please specify a drive letter to unmount.");
-            return;
+            return Task.CompletedTask;
         }
 
         _outputLog.Add($"[Unmount] Use the CLI tool for unmount operations: UFS2Tool umount_udf {MountDriveLetter}");
-        await Task.CompletedTask;
+        return Task.CompletedTask;
     }
 }

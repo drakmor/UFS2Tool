@@ -20,6 +20,11 @@ namespace UFS2Tool
         public string ImagePath { get; }
         public bool IsReadOnly { get; }
 
+        /// <summary>
+        /// Optional output writer for progress messages during add operations.
+        /// </summary>
+        public TextWriter? Output { get; set; }
+
         public Ufs2Image(string imagePath, bool readOnly = false)
         {
             ImagePath = imagePath;
@@ -92,7 +97,8 @@ namespace UFS2Tool
                 MTimeNsec = ufs1.MTimeNsec,
                 CTimeNsec = ufs1.CTimeNsec,
                 Generation = ufs1.Generation,
-                Flags = ufs1.Flags
+                Flags = ufs1.Flags,
+                DirDepth = ufs1.DirDepth
             };
 
             // Convert 32-bit block pointers to 64-bit
@@ -199,6 +205,10 @@ namespace UFS2Tool
             var inode = ReadInode(inodeNumber);
             if (!inode.IsRegularFile && !inode.IsSymlink)
                 throw new InvalidOperationException($"Inode {inodeNumber} is not a regular file or symlink.");
+
+            if (inode.Size > int.MaxValue)
+                throw new InvalidOperationException(
+                    $"File too large to read into memory ({inode.Size:N0} bytes exceeds {int.MaxValue:N0} byte limit).");
 
             byte[] data = new byte[inode.Size];
             long offset = 0;
@@ -568,7 +578,8 @@ namespace UFS2Tool
                 MTimeNsec = ufs2.MTimeNsec,
                 CTimeNsec = ufs2.CTimeNsec,
                 Generation = ufs2.Generation,
-                Flags = ufs2.Flags
+                Flags = ufs2.Flags,
+                DirDepth = ufs2.DirDepth
             };
 
             for (int i = 0; i < Ufs2Constants.NDirect; i++)
@@ -1339,6 +1350,10 @@ namespace UFS2Tool
             // Find the last data block of the directory
             long dirSize = dirInode.Size;
             int blockSize = Superblock.BSize;
+
+            if (dirSize <= 0)
+                throw new InvalidOperationException($"Directory inode {dirInodeNumber} has no data (size={dirSize}).");
+
             int lastBlockIndex = (int)((dirSize - 1) / blockSize);
 
             long lastBlockFrag = 0;
@@ -1502,7 +1517,7 @@ namespace UFS2Tool
 
         /// <summary>
         /// Read a block pointer at a given logical block index from an inode
-        /// (supports direct and single-indirect).
+        /// (supports direct, single-indirect, double-indirect, and triple-indirect).
         /// </summary>
         private long ReadBlockPointerAt(Ufs2Inode inode, int blockIndex)
         {
@@ -1511,16 +1526,54 @@ namespace UFS2Tool
 
             int ptrSize = Superblock.IsUfs1 ? 4 : 8;
             int pointersPerBlock = Superblock.BSize / ptrSize;
-            int indirectIndex = blockIndex - Ufs2Constants.NDirect;
+            int remaining = blockIndex - Ufs2Constants.NDirect;
 
-            if (indirectIndex < pointersPerBlock && inode.IndirectBlocks[0] != 0)
+            // Single indirect
+            if (remaining < pointersPerBlock)
             {
+                if (inode.IndirectBlocks[0] == 0) return 0;
                 long indBlockOffset = inode.IndirectBlocks[0] * Superblock.FSize;
-                _stream.Position = indBlockOffset + (long)indirectIndex * ptrSize;
+                _stream.Position = indBlockOffset + (long)remaining * ptrSize;
                 return Superblock.IsUfs1 ? _reader.ReadInt32() : _reader.ReadInt64();
             }
+            remaining -= pointersPerBlock;
 
-            return 0;
+            // Double indirect
+            long ppb = (long)pointersPerBlock * pointersPerBlock;
+            if (remaining < ppb)
+            {
+                if (inode.IndirectBlocks[1] == 0) return 0;
+                int idx1 = remaining / pointersPerBlock;
+                int idx2 = remaining % pointersPerBlock;
+
+                long dindBlockOffset = inode.IndirectBlocks[1] * Superblock.FSize;
+                _stream.Position = dindBlockOffset + (long)idx1 * ptrSize;
+                long indPtr = Superblock.IsUfs1 ? _reader.ReadInt32() : _reader.ReadInt64();
+                if (indPtr == 0) return 0;
+
+                _stream.Position = indPtr * Superblock.FSize + (long)idx2 * ptrSize;
+                return Superblock.IsUfs1 ? _reader.ReadInt32() : _reader.ReadInt64();
+            }
+            remaining -= (int)ppb;
+
+            // Triple indirect
+            if (inode.IndirectBlocks[2] == 0) return 0;
+            int tIdx1 = (int)(remaining / ppb);
+            int tRemainder = (int)(remaining % ppb);
+            int tIdx2 = tRemainder / pointersPerBlock;
+            int tIdx3 = tRemainder % pointersPerBlock;
+
+            long tindBlockOffset = inode.IndirectBlocks[2] * Superblock.FSize;
+            _stream.Position = tindBlockOffset + (long)tIdx1 * ptrSize;
+            long dindPtr = Superblock.IsUfs1 ? _reader.ReadInt32() : _reader.ReadInt64();
+            if (dindPtr == 0) return 0;
+
+            _stream.Position = dindPtr * Superblock.FSize + (long)tIdx2 * ptrSize;
+            long indPtr2 = Superblock.IsUfs1 ? _reader.ReadInt32() : _reader.ReadInt64();
+            if (indPtr2 == 0) return 0;
+
+            _stream.Position = indPtr2 * Superblock.FSize + (long)tIdx3 * ptrSize;
+            return Superblock.IsUfs1 ? _reader.ReadInt32() : _reader.ReadInt64();
         }
 
         /// <summary>
@@ -1864,6 +1917,7 @@ namespace UFS2Tool
                 // Source is a file — use the fs path's filename for the entry name
                 string parentPath = GetParentPath(fsPath);
                 string fsName = GetLastComponent(fsPath);
+                Output?.WriteLine($"  Adding file: {fsPath}");
                 AddFile(parentPath, sourcePath, fsName);
             }
             else if (Directory.Exists(sourcePath))
@@ -1871,6 +1925,7 @@ namespace UFS2Tool
                 // Source is a directory
                 string parentPath = GetParentPath(fsPath);
                 string dirName = GetLastComponent(fsPath);
+                Output?.WriteLine($"  Adding directory: {fsPath}");
                 AddDirectory(parentPath, dirName);
 
                 // Recursively add contents
@@ -1890,6 +1945,8 @@ namespace UFS2Tool
             foreach (string filePath in Directory.GetFiles(sourceDir))
             {
                 string fileName = Path.GetFileName(filePath);
+                string fsFilePath = fsDir.TrimEnd('/') + "/" + fileName;
+                Output?.WriteLine($"  Adding file: {fsFilePath}");
                 AddFile(fsDir, filePath);
             }
 
@@ -1897,6 +1954,7 @@ namespace UFS2Tool
             {
                 string subDirName = Path.GetFileName(subDirPath);
                 string fsDirPath = fsDir.TrimEnd('/') + "/" + subDirName;
+                Output?.WriteLine($"  Adding directory: {fsDirPath}");
                 AddDirectory(fsDir, subDirName);
                 AddDirectoryContentsRecursive(fsDirPath, subDirPath);
             }
@@ -1989,6 +2047,59 @@ namespace UFS2Tool
                     FreeInode(entry.Inode);
                 }
             }
+        }
+
+        // --- Rename support ---
+
+        /// <summary>
+        /// Rename a file or directory at the given filesystem path.
+        /// The entry stays in the same parent directory; only its name is changed.
+        /// </summary>
+        /// <param name="fsPath">Path of the file or directory to rename (e.g., "/path/to/old.txt").</param>
+        /// <param name="newName">New name for the entry (just the name, not a full path).</param>
+        public void Rename(string fsPath, string newName)
+        {
+            if (IsReadOnly)
+                throw new InvalidOperationException("Cannot rename: image is opened read-only.");
+
+            if (string.IsNullOrEmpty(newName))
+                throw new ArgumentException("New name cannot be empty.", nameof(newName));
+
+            if (newName.Contains('/'))
+                throw new ArgumentException("New name cannot contain path separators.", nameof(newName));
+
+            string parentPath = GetParentPath(fsPath);
+            string oldName = GetLastComponent(fsPath);
+
+            if (oldName == newName)
+                return; // Nothing to do
+
+            uint parentInode = ResolvePath(parentPath);
+            uint targetInode = ResolvePath(fsPath);
+            var inode = ReadInode(targetInode);
+
+            // Determine file type for the directory entry
+            byte fileType;
+            if (inode.IsDirectory)
+                fileType = Ufs2Constants.DtDir;
+            else if (inode.IsRegularFile)
+                fileType = Ufs2Constants.DtReg;
+            else if (inode.IsSymlink)
+                fileType = Ufs2Constants.DtLnk;
+            else
+                fileType = 0;
+
+            // Remove old entry and add new one with the same inode
+            RemoveDirectoryEntry(parentInode, oldName);
+            AddDirectoryEntry(parentInode, newName, targetInode, fileType);
+
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            inode.ChangeTime = now;
+            WriteInode(targetInode, inode);
+
+            Superblock.Time = now;
+            WriteSuperblock();
+            _stream.Flush();
         }
 
         // --- Chmod support ---
@@ -2847,8 +2958,8 @@ namespace UFS2Tool
 
             long inodeTableOffset = cgStartFrag * fragSize + (long)iblkno * fragSize;
 
-            // UFS2 di_gen at offset 0x50, UFS1 di_gen at offset 0x60
-            int genOffset = sb.IsUfs2 ? 0x50 : 0x60;
+            // UFS2 di_gen at offset 0x50, UFS1 di_gen at offset 0x6C
+            int genOffset = sb.IsUfs2 ? 0x50 : 0x6C;
 
             var rng = new Random(cgIndex + 1);
             int totalBytes = inodesPerGroup * inodeSize;

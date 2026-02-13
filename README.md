@@ -29,6 +29,7 @@ A complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `gr
   - [replace](#replace--replace-files-in-filesystem)
   - [add](#add--add-files-to-filesystem)
   - [delete](#delete--delete-files-from-filesystem)
+  - [rename](#rename--rename-files-or-directories)
   - [chmod](#chmod--change-file-permissions)
   - [mount_udf](#mount_udf--mount-ufs-image-as-windows-drive)
   - [umount_udf](#umount_udf--unmount-a-ufs-drive)
@@ -57,6 +58,7 @@ A complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `gr
 - **Replace files** in existing UFS1/UFS2 filesystem images (single file or directory tree)
 - **Add files** to existing UFS1/UFS2 filesystem images (single file or directory tree, recursive)
 - **Delete files** from existing UFS1/UFS2 filesystem images (single file or directory tree, recursive)
+- **Rename files** or directories inside UFS1/UFS2 filesystem images
 - **Mount UFS images** as Windows drives with read-write support via Dokan
 - **Read and inspect** existing UFS1/UFS2 filesystem images
 - **List directory contents** from UFS1/UFS2 images
@@ -343,6 +345,22 @@ ufs2tool delete myimage.img /path/to/file.txt
 ufs2tool delete myimage.img /path/to/dir
 ```
 
+### `rename` — Rename files or directories
+
+```
+ufs2tool rename <image-path> <fs-path> <new-name>
+```
+
+Rename a file or directory inside a UFS1/UFS2 filesystem image. The entry stays in the same parent directory; only its name is changed.
+
+```bash
+# Rename a file
+ufs2tool rename myimage.img /path/to/old.txt newname.txt
+
+# Rename a directory
+ufs2tool rename myimage.img /path/to/olddir newdir
+```
+
 ### `chmod` — Change file permissions
 
 ```
@@ -523,7 +541,7 @@ The project includes a modern cross-platform GUI built with [Avalonia UI](https:
 - **Maintenance** — TuneFS, GrowFS, and FsckUFS operations
 - **Device Mount** — Mount/unmount UFS images as Windows drives (Windows only, requires Dokan)
 - **PS5 Quick Create** — Preset templates for PS5-compatible filesystem creation
-- **Settings** — Language selection (supports 11 languages)
+- **Settings** — Language selection (supports 21 languages)
 
 **Building the GUI:**
 

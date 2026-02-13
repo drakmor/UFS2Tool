@@ -7,6 +7,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using UFS2Tool;
+using UFS2Tool.GUI.Services;
 namespace UFS2Tool.GUI.ViewModels;
 
 public partial class PS5QuickCreateViewModel : ViewModelBase
@@ -57,15 +58,19 @@ public partial class PS5QuickCreateViewModel : ViewModelBase
         }
 
         IsRunning = true;
+        _outputLog.Add($"[PS5] Creating PS5 filesystem image using {(UseMakefs ? "makefs" : "newfs")} mode...");
+        _outputLog.Add($"[PS5] Input directory: {InputDirectory}");
+        _outputLog.Add($"[PS5] Output image: {ImagePath}");
 
         try
         {
             if (UseMakefs)
             {
-                _outputLog.Add($"[PS5] makefs -S 4096 -t ffs -o version=2,minfree=0,softupdates=0,optimization=space {ImagePath} {InputDirectory}");
+                _outputLog.Add($"[PS5] Command: makefs -S 4096 -t ffs -o version=2,minfree=0,softupdates=0,optimization=space {ImagePath} {InputDirectory}");
 
                 await Task.Run(() =>
                 {
+                    using var logWriter = new LogTextWriter(_outputLog);
                     var creator = new Ufs2ImageCreator
                     {
                         FilesystemFormat = 2,
@@ -74,6 +79,8 @@ public partial class PS5QuickCreateViewModel : ViewModelBase
                         MinFreePercent = 0,
                         SoftUpdates = false,
                         OptimizationPreference = "space",
+                        Output = logWriter,
+                        ErrorOutput = logWriter,
                     };
 
                     creator.InputDirectory = InputDirectory;
@@ -82,13 +89,16 @@ public partial class PS5QuickCreateViewModel : ViewModelBase
             }
             else
             {
-                _outputLog.Add($"[PS5] newfs -D {InputDirectory} {ImagePath}");
+                _outputLog.Add($"[PS5] Command: newfs -D {InputDirectory} {ImagePath}");
 
                 await Task.Run(() =>
                 {
+                    using var logWriter = new LogTextWriter(_outputLog);
                     var creator = new Ufs2ImageCreator
                     {
                         FilesystemFormat = 2,
+                        Output = logWriter,
+                        ErrorOutput = logWriter,
                     };
 
                     creator.InputDirectory = InputDirectory;

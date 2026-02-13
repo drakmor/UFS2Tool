@@ -261,6 +261,29 @@ ufs2tool delete <image-path> <fs-path>
 - Updates all filesystem metadata (CG counters, superblock free counts)
 - Parent directory link count updates for subdirectory deletion
 
+### `rename` — Rename files or directories
+
+Renames a file or directory inside a UFS1/UFS2 filesystem image. The entry stays in the same parent directory; only its name is changed.
+
+**Synopsis:**
+```
+ufs2tool rename <image-path> <fs-path> <new-name>
+```
+
+**Features:**
+- Rename a single file or directory by path
+- Preserves file content and inode metadata
+- Directory contents are preserved after rename
+- Updates inode change time (`ctime`)
+- Supports both UFS1 and UFS2 filesystem formats
+- Also available through the Dokan mount interface (`MoveFile`)
+
+**Examples:**
+```
+ufs2tool rename myimage.img /path/to/old.txt newname.txt
+ufs2tool rename myimage.img /path/to/olddir newdir
+```
+
 ### `chmod` — Change file permissions
 
 Changes the permission mode of a file or directory inside a UFS1/UFS2 filesystem image, or applies permissions to the entire image recursively.
@@ -328,7 +351,6 @@ ufs2tool mount_udf [-o options] [-v] <image-path> <drive-letter>
 
 **Limitations:**
 - Symlinks are presented as regular files containing the link target
-- File rename/move is not supported through the mount interface
 
 ### `umount_udf` — Unmount a UFS drive
 

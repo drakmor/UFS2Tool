@@ -7,6 +7,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using UFS2Tool;
+using UFS2Tool.GUI.Services;
 
 namespace UFS2Tool.GUI.ViewModels;
 
@@ -44,6 +45,9 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
     private string _chmodMode = "755";
 
     [ObservableProperty]
+    private string _newName = "";
+
+    [ObservableProperty]
     private bool _chmodRecursive;
 
     [ObservableProperty]
@@ -64,6 +68,7 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
     {
         if (!ValidateImagePath()) return;
         IsRunning = true;
+        _outputLog.Add($"[Info] Loading filesystem information from '{ImagePath}'...");
         try
         {
             string info = "";
@@ -73,7 +78,7 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
                 info = image.GetInfo();
             });
             SuperblockInfo = info;
-            _outputLog.Add("[Info] Filesystem information loaded.");
+            _outputLog.Add("[Info] Filesystem information loaded successfully.");
             _outputLog.Add(info);
         }
         catch (Exception ex)
@@ -88,8 +93,10 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
     {
         if (!ValidateImagePath()) return;
         IsRunning = true;
+        _outputLog.Add($"[LS] Listing directory '{FsPath}' in '{ImagePath}'...");
         try
         {
+            (int fileCount, int dirCount, int symlinkCount) counts = (0, 0, 0);
             await Task.Run(() =>
             {
                 using var image = new Ufs2Image(ImagePath, readOnly: true);
@@ -112,8 +119,19 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
                         });
                     }
                 });
+
+                foreach (var entry in entries)
+                {
+                    if (entry.Inode == 0 || entry.Name == "." || entry.Name == "..") continue;
+                    switch (entry.FileType)
+                    {
+                        case 4: counts.dirCount++; break;
+                        case 8: counts.fileCount++; break;
+                        case 10: counts.symlinkCount++; break;
+                    }
+                }
             });
-            _outputLog.Add($"[LS] Listed directory: {FsPath}");
+            _outputLog.Add($"[LS] Listed directory: {FsPath} — {counts.fileCount} file(s), {counts.dirCount} dir(s), {counts.symlinkCount} symlink(s)");
         }
         catch (Exception ex)
         {
@@ -132,14 +150,18 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
             return;
         }
         IsRunning = true;
+        _outputLog.Add($"[Extract] Extracting '{FsPath}' from '{ImagePath}' to '{OutputDirectory}'...");
         try
         {
+            string extractType = "";
             await Task.Run(() =>
             {
                 using var image = new Ufs2Image(ImagePath, readOnly: true);
+                var inode = image.ReadInode(image.ResolvePath(FsPath ?? "/"));
+                extractType = inode.IsDirectory ? "directory" : "file";
                 image.Extract(FsPath ?? "/", OutputDirectory);
             });
-            _outputLog.Add($"[Extract] Extracted '{FsPath}' to '{OutputDirectory}'.");
+            _outputLog.Add($"[Extract] Successfully extracted {extractType} '{FsPath}' to '{OutputDirectory}'.");
         }
         catch (Exception ex)
         {
@@ -158,14 +180,18 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
             return;
         }
         IsRunning = true;
+        bool isDir = System.IO.Directory.Exists(LocalPath);
+        _outputLog.Add($"[Add] Adding {(isDir ? "directory" : "file")} '{LocalPath}' to '{FsPath}' in '{ImagePath}'...");
         try
         {
             await Task.Run(() =>
             {
+                using var logWriter = new LogTextWriter(_outputLog);
                 using var image = new Ufs2Image(ImagePath);
+                image.Output = logWriter;
                 image.Add(FsPath ?? "/", LocalPath);
             });
-            _outputLog.Add($"[Add] Added '{LocalPath}' to '{FsPath}'.");
+            _outputLog.Add($"[Add] Successfully added '{LocalPath}' to '{FsPath}'.");
         }
         catch (Exception ex)
         {
@@ -184,6 +210,7 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
             return;
         }
         IsRunning = true;
+        _outputLog.Add($"[Delete] Deleting '{FsPath}' from '{ImagePath}'...");
         try
         {
             await Task.Run(() =>
@@ -191,7 +218,39 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
                 using var image = new Ufs2Image(ImagePath);
                 image.Delete(FsPath);
             });
-            _outputLog.Add($"[Delete] Deleted '{FsPath}'.");
+            _outputLog.Add($"[Delete] Successfully deleted '{FsPath}'.");
+        }
+        catch (Exception ex)
+        {
+            _outputLog.Add($"[Error] {ex.Message}");
+        }
+        finally { IsRunning = false; }
+    }
+
+    [RelayCommand]
+    private async Task RenameAsync()
+    {
+        if (!ValidateImagePath()) return;
+        if (string.IsNullOrWhiteSpace(FsPath) || FsPath == "/")
+        {
+            _outputLog.Add("[Error] Please specify a filesystem path to rename.");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(NewName))
+        {
+            _outputLog.Add("[Error] Please specify a new name.");
+            return;
+        }
+        IsRunning = true;
+        _outputLog.Add($"[Rename] Renaming '{FsPath}' to '{NewName}' in '{ImagePath}'...");
+        try
+        {
+            await Task.Run(() =>
+            {
+                using var image = new Ufs2Image(ImagePath);
+                image.Rename(FsPath, NewName);
+            });
+            _outputLog.Add($"[Rename] Successfully renamed '{FsPath}' to '{NewName}'.");
         }
         catch (Exception ex)
         {
@@ -210,6 +269,7 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
             return;
         }
         IsRunning = true;
+        _outputLog.Add($"[Replace] Replacing '{FsPath}' with '{LocalPath}' in '{ImagePath}'...");
         try
         {
             await Task.Run(() =>
@@ -217,7 +277,7 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
                 using var image = new Ufs2Image(ImagePath);
                 image.Replace(FsPath, LocalPath);
             });
-            _outputLog.Add($"[Replace] Replaced '{FsPath}' with '{LocalPath}'.");
+            _outputLog.Add($"[Replace] Successfully replaced '{FsPath}' with '{LocalPath}'.");
         }
         catch (Exception ex)
         {
@@ -236,11 +296,26 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
             return;
         }
         IsRunning = true;
+        _outputLog.Add($"[Chmod] Changing permissions of '{FsPath}' to {ChmodMode}{(ChmodRecursive ? " (recursive)" : "")} in '{ImagePath}'...");
         try
         {
             await Task.Run(() =>
             {
-                ushort mode = Convert.ToUInt16(ChmodMode, 8);
+                ushort mode;
+                try
+                {
+                    mode = Convert.ToUInt16(ChmodMode, 8);
+                }
+                catch (FormatException)
+                {
+                    _outputLog.Add($"[Error] Invalid octal mode: '{ChmodMode}'. Use octal digits (0-7), e.g. 755.");
+                    return;
+                }
+                catch (OverflowException)
+                {
+                    _outputLog.Add($"[Error] Mode value '{ChmodMode}' is out of range. Maximum is 7777.");
+                    return;
+                }
                 using var image = new Ufs2Image(ImagePath);
                 if (ChmodRecursive)
                 {
@@ -252,7 +327,7 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
                     image.Chmod(FsPath ?? "/", mode);
                 }
             });
-            _outputLog.Add($"[Chmod] Changed permissions of '{FsPath}' to {ChmodMode}{(ChmodRecursive ? " (recursive)" : "")}.");
+            _outputLog.Add($"[Chmod] Successfully changed permissions of '{FsPath}' to {ChmodMode}{(ChmodRecursive ? " (recursive)" : "")}.");
         }
         catch (Exception ex)
         {

@@ -21,7 +21,8 @@
                     Padding="12,2" FontSize="12"/>
         </DockPanel>
         <ListBox ItemsSource="{Binding OutputLog}" Margin="8,0,8,4"
-                 FontFamily="Cascadia Mono,Consolas,Courier New,monospace" FontSize="12">
+                 FontFamily="Cascadia Mono,Consolas,Courier New,monospace" FontSize="12"
+                 x:Name="LogList">
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <TextBlock Text="{Binding}" TextWrapping="Wrap"/>

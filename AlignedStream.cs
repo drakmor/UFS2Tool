@@ -140,6 +140,7 @@ namespace UFS2Tool
             if (!_disposed)
             {
                 _deviceStream.Flush();
+                _deviceStream.Dispose();
                 _disposed = true;
             }
         }

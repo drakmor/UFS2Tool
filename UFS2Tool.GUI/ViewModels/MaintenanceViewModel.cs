@@ -60,11 +60,17 @@ public partial class MaintenanceViewModel : ViewModelBase
         _outputLog = outputLog;
     }
 
+    private void LogMessage(string message)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => _outputLog.Add(message));
+    }
+
     [RelayCommand]
     private async Task TuneFilesystemAsync()
     {
         if (!ValidateImagePath()) return;
         IsRunning = true;
+        LogMessage($"[TuneFS] Opening image: {ImagePath}");
         try
         {
             await Task.Run(() =>
@@ -73,50 +79,57 @@ public partial class MaintenanceViewModel : ViewModelBase
                 var sb = image.Superblock;
                 bool modified = false;
 
+                LogMessage($"[TuneFS] Current filesystem: UFS{(sb.IsUfs1 ? "1" : "2")}, Volume: '{sb.VolumeName}', MinFree: {sb.MinFreePercent}%");
+
                 if (!string.IsNullOrWhiteSpace(TuneVolumeName))
                 {
+                    LogMessage($"[TuneFS] Volume name: '{sb.VolumeName}' -> '{TuneVolumeName}'");
                     sb.VolumeName = TuneVolumeName;
                     modified = true;
-                    _outputLog.Add($"[TuneFS] Volume name set to: {TuneVolumeName}");
                 }
 
                 if (TuneSoftUpdates)
                 {
                     sb.Flags |= Ufs2Constants.FsDosoftdep;
                     modified = true;
-                    _outputLog.Add("[TuneFS] Soft updates enabled.");
+                    LogMessage("[TuneFS] Soft updates enabled.");
                 }
 
                 if (TuneSoftUpdatesJournal)
                 {
                     sb.Flags |= Ufs2Constants.FsSuj;
                     modified = true;
-                    _outputLog.Add("[TuneFS] Soft updates journaling enabled.");
+                    LogMessage("[TuneFS] Soft updates journaling enabled.");
                 }
 
                 if (!string.IsNullOrWhiteSpace(TuneMinFreePercent) && int.TryParse(TuneMinFreePercent, out int minfree))
                 {
+                    LogMessage($"[TuneFS] Minimum free space: {sb.MinFreePercent}% -> {minfree}%");
                     sb.MinFreePercent = minfree;
                     modified = true;
-                    _outputLog.Add($"[TuneFS] Minimum free space set to: {minfree}%");
                 }
 
                 if (!string.IsNullOrWhiteSpace(TuneOptimization))
                 {
+                    string oldOpt = sb.Optimization == Ufs2Constants.FsOptSpace ? "space" : "time";
                     sb.Optimization = TuneOptimization == "space" ? 1 : 0;
                     modified = true;
-                    _outputLog.Add($"[TuneFS] Optimization preference set to: {TuneOptimization}");
+                    LogMessage($"[TuneFS] Optimization preference: {oldOpt} -> {TuneOptimization}");
                 }
 
                 if (modified && !TunePrintOnly)
                 {
                     image.WriteSuperblockToAll();
-                    _outputLog.Add("[TuneFS] Superblock updated successfully.");
+                    LogMessage("[TuneFS] Superblock updated successfully.");
                 }
                 else if (TunePrintOnly)
                 {
-                    _outputLog.Add("[TuneFS] Print-only mode — no changes written.");
-                    _outputLog.Add(image.GetInfo());
+                    LogMessage("[TuneFS] Print-only mode — no changes written.");
+                    LogMessage(image.GetInfo());
+                }
+                else
+                {
+                    LogMessage("[TuneFS] No changes specified.");
                 }
             });
         }
@@ -132,15 +145,22 @@ public partial class MaintenanceViewModel : ViewModelBase
     {
         if (!ValidateImagePath()) return;
         IsRunning = true;
+        _outputLog.Add($"[GrowFS] Growing filesystem '{ImagePath}' to {NewSizeInMB} MB{(GrowDryRun ? " (dry run)" : "")}...");
         try
         {
             await Task.Run(() =>
             {
                 long newSizeBytes = NewSizeInMB * 1024 * 1024;
+
                 using var image = new Ufs2Image(ImagePath);
+                var sb = image.Superblock;
+                long oldSizeBytes = sb.TotalBlocks * sb.FSize;
+                long oldSizeMB = oldSizeBytes / (1024 * 1024);
+                LogMessage($"[GrowFS] Current size: {oldSizeMB} MB ({sb.NumCylGroups} cylinder groups)");
+
                 image.GrowFs(newSizeBytes, GrowDryRun);
             });
-            _outputLog.Add($"[GrowFS] Filesystem grown to {NewSizeInMB} MB{(GrowDryRun ? " (dry run)" : "")}.");
+            _outputLog.Add($"[GrowFS] Filesystem grown to {NewSizeInMB} MB{(GrowDryRun ? " (dry run)" : "")} successfully.");
         }
         catch (Exception ex)
         {
@@ -154,14 +174,17 @@ public partial class MaintenanceViewModel : ViewModelBase
     {
         if (!ValidateImagePath()) return;
         IsRunning = true;
+        _outputLog.Add($"[FsckUFS] Starting filesystem check on '{ImagePath}'{(FsckPreen ? " (preen mode)" : "")}{(FsckDebug ? " (debug mode)" : "")}...");
         try
         {
             Ufs2Image.FsckResult? result = null;
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             await Task.Run(() =>
             {
                 using var image = new Ufs2Image(ImagePath);
                 result = image.FsckUfs(FsckPreen, FsckDebug);
             });
+            stopwatch.Stop();
 
             if (result != null)
             {
@@ -180,6 +203,8 @@ public partial class MaintenanceViewModel : ViewModelBase
                 foreach (var msg in result.Messages) _outputLog.Add($"  {msg}");
                 foreach (var warn in result.Warnings) _outputLog.Add($"  [Warning] {warn}");
                 foreach (var err in result.Errors) _outputLog.Add($"  [ERROR] {err}");
+
+                _outputLog.Add($"[FsckUFS] Check completed in {stopwatch.ElapsedMilliseconds} ms.");
             }
         }
         catch (Exception ex)

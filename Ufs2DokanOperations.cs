@@ -334,6 +334,14 @@ namespace UFS2Tool
                 {
                     // Other types (fifo, char, block, socket) — show as system files
                     fi.Attributes = FileAttributes.ReadOnly | FileAttributes.System;
+
+                    lock (_lock)
+                    {
+                        var entryInode = _image.ReadInode(entry.Inode);
+                        fi.CreationTime = UnixToDateTime(entryInode.CreateTime);
+                        fi.LastAccessTime = UnixToDateTime(entryInode.AccessTime);
+                        fi.LastWriteTime = UnixToDateTime(entryInode.ModTime);
+                    }
                 }
 
                 files.Add(fi);
@@ -485,8 +493,33 @@ namespace UFS2Tool
         public NtStatus MoveFile(string oldName, string newName, bool replace,
             IDokanFileInfo info)
         {
-            // MoveFile/rename is not supported by the UFS image API
-            return DokanResult.NotImplemented;
+            if (_readOnly)
+                return DokanResult.AccessDenied;
+
+            try
+            {
+                lock (_lock)
+                {
+                    string oldPath = NormalizePath(oldName);
+                    string newPath = NormalizePath(newName);
+
+                    // Extract just the new file/directory name from the new path
+                    string newFileName = newPath.Contains('/')
+                        ? newPath[(newPath.LastIndexOf('/') + 1)..]
+                        : newPath;
+
+                    _image.Rename(oldPath, newFileName);
+                }
+                return DokanResult.Success;
+            }
+            catch (InvalidOperationException)
+            {
+                return DokanResult.AccessDenied;
+            }
+            catch (IOException)
+            {
+                return DokanResult.AccessDenied;
+            }
         }
 
         public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info)
