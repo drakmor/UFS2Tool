@@ -39,6 +39,8 @@ namespace UFS2Tool
         public AlignedStream(FileStream deviceStream, int sectorSize, long deviceSize)
         {
             _deviceStream = deviceStream ?? throw new ArgumentNullException(nameof(deviceStream));
+            if (sectorSize <= 0)
+                throw new ArgumentOutOfRangeException(nameof(sectorSize), "Sector size must be positive.");
             _sectorSize = sectorSize;
             _deviceSize = deviceSize;
             _sectorBuffer = new byte[sectorSize];

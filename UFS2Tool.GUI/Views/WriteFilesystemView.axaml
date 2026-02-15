@@ -1,0 +1,96 @@
+<!-- Copyright (c) 2026, SvenGDK -->
+<!-- Licensed under the BSD 2-Clause License. See LICENSE file for details. -->
+
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UFS2Tool.GUI.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+             x:Class="UFS2Tool.GUI.Views.WriteFilesystemView"
+             x:DataType="vm:WriteFilesystemViewModel">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16" Spacing="16">
+
+            <!-- Warning Notice -->
+            <Border Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
+                    CornerRadius="4" Padding="12">
+                <TextBlock Text="{Binding Loc[WriteFilesystemWarning]}"
+                           TextWrapping="Wrap" FontSize="13"/>
+            </Border>
+
+            <!-- Source Image -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Loc[WriteSourceImage]}" FontWeight="SemiBold" FontSize="15"/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="..." Click="BrowseSourceImage_Click"
+                                Padding="12,6" Margin="8,0,0,0"/>
+                        <TextBox Text="{Binding SourceImagePath}" Watermark="{Binding Loc[WriteSourceImageWatermark]}"/>
+                    </DockPanel>
+                    <TextBlock Text="{Binding Loc[WriteSourceImageHint]}"
+                               FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Target Drive -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Loc[WriteTargetDrive]}" FontWeight="SemiBold" FontSize="15"/>
+                    <Grid ColumnDefinitions="120,*,8,Auto" ColumnSpacing="8" RowDefinitions="Auto,Auto" RowSpacing="8">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Loc[WriteDevicePath]}"
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding TargetDevicePath}"
+                                 Watermark="{Binding Loc[WriteDevicePathWatermark]}"/>
+                        <Button Grid.Row="0" Grid.Column="3" Content="{Binding Loc[WriteRefreshDrives]}"
+                                Command="{Binding RefreshDrivesCommand}"
+                                IsEnabled="{Binding !IsWriting}" Padding="16,6"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding Loc[WriteAvailableDrives]}"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding AvailableDrives}"
+                                  SelectedItem="{Binding SelectedDrive}"
+                                  HorizontalAlignment="Stretch"
+                                  PlaceholderText="{Binding Loc[WriteSelectDrive]}"/>
+                    </Grid>
+                    <TextBlock Text="{Binding Loc[WriteTargetDriveHint]}"
+                               FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Write Options -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Loc[WriteOptions]}" FontWeight="SemiBold" FontSize="15"/>
+                    <WrapPanel Orientation="Horizontal">
+                        <CheckBox Content="{Binding Loc[WriteVerifyAfterWrite]}" IsChecked="{Binding VerifyAfterWrite}"
+                                  Margin="0,0,24,0"/>
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Progress -->
+            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                    CornerRadius="4" Padding="16"
+                    IsVisible="{Binding HasProgress}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Loc[WriteProgress]}" FontWeight="SemiBold" FontSize="15"/>
+                    <ProgressBar Value="{Binding ProgressPercent}" Minimum="0" Maximum="100"/>
+                    <TextBlock Text="{Binding ProgressText}" FontSize="12"
+                               Foreground="{DynamicResource SystemBaseMediumColor}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Write Button -->
+            <Button Content="{Binding Loc[WriteFilesystem]}" Command="{Binding WriteFilesystemCommand}"
+                    IsEnabled="{Binding !IsWriting}"
+                    HorizontalAlignment="Right" Padding="24,8"
+                    FontWeight="SemiBold" FontSize="14"
+                    Classes="accent"/>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

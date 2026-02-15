@@ -4,6 +4,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:UFS2Tool.GUI.ViewModels"
+             xmlns:models="using:UFS2Tool.GUI.Models"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
@@ -11,7 +12,7 @@
              x:DataType="vm:PS5QuickCreateViewModel">
 
     <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="16" Spacing="16">
+        <StackPanel Margin="16" Spacing="12">
 
             <!-- Description -->
             <Border Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
@@ -20,56 +21,156 @@
                            TextWrapping="Wrap" FontSize="13"/>
             </Border>
 
-            <!-- Input Directory -->
-            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
-                    CornerRadius="4" Padding="16">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="{Binding Loc[PS5InputDirectory]}" FontWeight="SemiBold" FontSize="15"/>
-                    <DockPanel>
-                        <Button DockPanel.Dock="Right" Content="..." Click="BrowseInputDirectory_Click"
-                                Padding="12,6" Margin="8,0,0,0"/>
-                        <TextBox Text="{Binding InputDirectory}" Watermark="{Binding Loc[PS5InputDirectoryWatermark]}"/>
-                    </DockPanel>
-                    <TextBlock Text="{Binding Loc[PS5InputDirectoryHint]}"
-                               FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"/>
-                </StackPanel>
-            </Border>
+            <!-- Mode Toggle & Configuration in a horizontal layout -->
+            <Grid ColumnDefinitions="*,16,*">
 
-            <!-- Output Filename -->
-            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
-                    CornerRadius="4" Padding="16">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="{Binding Loc[PS5Filename]}" FontWeight="SemiBold" FontSize="15"/>
-                    <DockPanel>
-                        <Button DockPanel.Dock="Right" Content="..." Click="BrowseImagePath_Click"
-                                Padding="12,6" Margin="8,0,0,0"/>
-                        <TextBox Text="{Binding ImagePath}" Watermark="{Binding Loc[PS5FilenameWatermark]}"/>
-                    </DockPanel>
-                </StackPanel>
-            </Border>
-
-            <!-- Configuration -->
-            <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
-                    CornerRadius="4" Padding="16">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="{Binding Loc[PS5Preset]}" FontWeight="SemiBold" FontSize="15"/>
-                    <StackPanel Spacing="4">
-                        <RadioButton Content="{Binding Loc[PS5UseMakefs]}"
-                                     IsChecked="{Binding UseMakefs}"
-                                     GroupName="PS5Method"/>
-                        <TextBlock Text="{Binding Loc[PS5MakefsHint]}"
-                                   FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"
-                                   Margin="24,0,0,0" TextWrapping="Wrap"/>
-                        <RadioButton Content="{Binding Loc[PS5UseNewfs]}"
-                                     IsChecked="{Binding UseNewfs}"
-                                     GroupName="PS5Method"
-                                     Margin="0,8,0,0"/>
-                        <TextBlock Text="{Binding Loc[PS5NewfsHint]}"
-                                   FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"
-                                   Margin="24,0,0,0" TextWrapping="Wrap"/>
+                <!-- Mode Toggle -->
+                <Border Grid.Column="0"
+                        BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                        CornerRadius="4" Padding="16">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding Loc[PS5Mode]}" FontWeight="SemiBold" FontSize="15"/>
+                        <StackPanel Spacing="4">
+                            <RadioButton Content="{Binding Loc[PS5ModeSingle]}"
+                                         IsChecked="{Binding !IsBatchMode}"
+                                         GroupName="PS5Mode"/>
+                            <RadioButton Content="{Binding Loc[PS5ModeBatch]}"
+                                         IsChecked="{Binding IsBatchMode}"
+                                         GroupName="PS5Mode"/>
+                        </StackPanel>
                     </StackPanel>
-                </StackPanel>
-            </Border>
+                </Border>
+
+                <!-- Configuration -->
+                <Border Grid.Column="2"
+                        BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                        CornerRadius="4" Padding="16">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding Loc[PS5Preset]}" FontWeight="SemiBold" FontSize="15"/>
+                        <StackPanel Spacing="4">
+                            <RadioButton Content="{Binding Loc[PS5UseMakefs]}"
+                                         IsChecked="{Binding UseMakefs}"
+                                         GroupName="PS5Method"/>
+                            <TextBlock Text="{Binding Loc[PS5MakefsHint]}"
+                                       FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"
+                                       Margin="24,0,0,0" TextWrapping="Wrap"/>
+                            <RadioButton Content="{Binding Loc[PS5UseNewfs]}"
+                                         IsChecked="{Binding UseNewfs}"
+                                         GroupName="PS5Method"
+                                         Margin="0,4,0,0"/>
+                            <TextBlock Text="{Binding Loc[PS5NewfsHint]}"
+                                       FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"
+                                       Margin="24,0,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Single Mode -->
+            <StackPanel Spacing="12" IsVisible="{Binding !IsBatchMode}">
+
+                <!-- Input Directory -->
+                <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                        CornerRadius="4" Padding="16">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding Loc[PS5InputDirectory]}" FontWeight="SemiBold" FontSize="15"/>
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="..." Click="BrowseInputDirectory_Click"
+                                    Padding="12,6" Margin="8,0,0,0"/>
+                            <TextBox Text="{Binding InputDirectory}" Watermark="{Binding Loc[PS5InputDirectoryWatermark]}"/>
+                        </DockPanel>
+                        <TextBlock Text="{Binding Loc[PS5InputDirectoryHint]}"
+                                   FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Output Filename -->
+                <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                        CornerRadius="4" Padding="16">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding Loc[PS5Filename]}" FontWeight="SemiBold" FontSize="15"/>
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="..." Click="BrowseImagePath_Click"
+                                    Padding="12,6" Margin="8,0,0,0"/>
+                            <TextBox Text="{Binding ImagePath}" Watermark="{Binding Loc[PS5FilenameWatermark]}"/>
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- Batch Mode -->
+            <StackPanel Spacing="12" IsVisible="{Binding IsBatchMode}">
+
+                <!-- Batch Output Directory -->
+                <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                        CornerRadius="4" Padding="16">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding Loc[PS5BatchOutputDir]}" FontWeight="SemiBold" FontSize="15"/>
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="..." Click="BrowseBatchOutputDirectory_Click"
+                                    Padding="12,6" Margin="8,0,0,0"/>
+                            <TextBox Text="{Binding BatchOutputDirectory}" Watermark="{Binding Loc[PS5BatchOutputDirWatermark]}"/>
+                        </DockPanel>
+                        <TextBlock Text="{Binding Loc[PS5BatchOutputDirHint]}"
+                                   FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Batch Items -->
+                <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                        CornerRadius="4" Padding="16">
+                    <StackPanel Spacing="8">
+                        <DockPanel>
+                            <TextBlock Text="{Binding Loc[PS5BatchFolders]}" FontWeight="SemiBold" FontSize="15"
+                                       VerticalAlignment="Center"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="4">
+                                <Button Content="{Binding Loc[PS5BatchAddFolder]}" Command="{Binding AddBatchItemCommand}"
+                                        IsEnabled="{Binding !IsRunning}"
+                                        Padding="12,4" FontSize="12"/>
+                                <Button Content="{Binding Loc[PS5BatchAddFolders]}" Click="BrowseBatchFolders_Click"
+                                        IsEnabled="{Binding !IsRunning}"
+                                        Padding="12,4" FontSize="12"/>
+                                <Button Content="{Binding Loc[PS5BatchRemove]}"
+                                        Command="{Binding RemoveBatchItemCommand}"
+                                        CommandParameter="{Binding SelectedBatchItem}"
+                                        IsEnabled="{Binding !IsRunning}"
+                                        Padding="12,4" FontSize="12"/>
+                                <Button Content="{Binding Loc[PS5BatchClear]}" Command="{Binding ClearBatchItemsCommand}"
+                                        IsEnabled="{Binding !IsRunning}"
+                                        Padding="12,4" FontSize="12"/>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <DataGrid ItemsSource="{Binding BatchItems}"
+                                  SelectedItem="{Binding SelectedBatchItem}"
+                                  AutoGenerateColumns="False"
+                                  CanUserReorderColumns="False"
+                                  CanUserResizeColumns="True"
+                                  CanUserSortColumns="False"
+                                  GridLinesVisibility="Horizontal"
+                                  MinHeight="150" MaxHeight="300"
+                                  IsReadOnly="False">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="{Binding $parent[UserControl].((vm:PS5QuickCreateViewModel)DataContext).Loc[PS5BatchColInput]}"
+                                                    Binding="{Binding InputDirectory}"
+                                                    Width="2*"/>
+                                <DataGridTextColumn Header="{Binding $parent[UserControl].((vm:PS5QuickCreateViewModel)DataContext).Loc[PS5BatchColOutput]}"
+                                                    Binding="{Binding OutputImagePath}"
+                                                    Width="2*"/>
+                                <DataGridTextColumn Header="{Binding $parent[UserControl].((vm:PS5QuickCreateViewModel)DataContext).Loc[PS5BatchColStatus]}"
+                                                    Binding="{Binding Status}"
+                                                    Width="100"
+                                                    IsReadOnly="True"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <!-- Progress -->
+                        <TextBlock Text="{Binding BatchProgress}" FontSize="12"
+                                   Foreground="{DynamicResource SystemBaseMediumColor}"
+                                   IsVisible="{Binding IsRunning}"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
 
             <!-- Create Button -->
             <Button Content="{Binding Loc[PS5CreateButton]}" Command="{Binding CreatePS5ImageCommand}"

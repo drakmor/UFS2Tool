@@ -4,7 +4,7 @@ This document summarizes all features implemented in UFS2-Tool.
 
 ## Overview
 
-UFS2-Tool is a complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `growfs(8)`, and `fsck_ufs(8)` commands written in C#, targeting .NET 8.0. It creates, manages, and checks UFS1/UFS2 filesystems on Windows, supporting both image files and raw disk devices. Filesystem images created by this tool are compatible with FreeBSD's `mount` and `fsck_ffs`.
+UFS2-Tool is a complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `growfs(8)`, `fsck_ufs(8)`, and `du(1)` commands written in C#, targeting .NET 8.0. It creates, manages, and checks UFS1/UFS2 filesystems on Windows, supporting both image files and raw disk devices. Filesystem images created by this tool are compatible with FreeBSD's `mount` and `fsck_ffs`. A cross-platform GUI application (Avalonia UI) is included with PS5 batch processing and automatic language detection from OS locale (26 languages).
 
 ## Project Structure
 
@@ -13,6 +13,7 @@ UFS2-Tool is a complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tu
 | `UFS2-Tool.sln` | Visual Studio solution file |
 | `UFS2Tool.csproj` | Main project (console application, .NET 8.0) |
 | `UFS2Tool.Tests/` | xUnit test project |
+| `UFS2Tool.GUI/` | Cross-platform GUI application (Avalonia UI) |
 | `Program.cs` | CLI entry point and argument parsing |
 | `Ufs2ImageCreator.cs` | Filesystem creation (`newfs`/`makefs` implementation) |
 | `Ufs2Image.cs` | Filesystem reading and inspection |
@@ -316,6 +317,108 @@ ufs2tool chmod -R myimage.img 644
 ufs2tool chmod -R myimage.img 644 755
 ```
 
+### `stat` — Show detailed file information
+
+Displays detailed inode information for a file, directory, or symbolic link inside a UFS1/UFS2 filesystem image. Similar to the Unix `stat(1)` command.
+
+**Synopsis:**
+```
+ufs2tool stat <image-path> <fs-path>
+```
+
+**Output includes:**
+- File path and type (Regular File, Directory, Symbolic Link, etc.)
+- Inode number
+- Permissions in both octal and symbolic format (e.g., `0755/drwxr-xr-x`)
+- Hard link count
+- Owner UID and GID
+- File size in bytes
+- Block count (512-byte blocks)
+- Block size
+- Timestamps: access, modify, change, and birth times
+- Direct and indirect block pointer usage
+
+**Examples:**
+```
+ufs2tool stat myimage.img /
+ufs2tool stat myimage.img /path/to/file.txt
+ufs2tool stat myimage.img /path/to/dir
+```
+
+### `find` — Search for files by name pattern
+
+Searches recursively for files and directories matching a name pattern within a UFS1/UFS2 filesystem image. Similar to the Unix `find(1)` command with `-name` matching.
+
+**Synopsis:**
+```
+ufs2tool find <image-path> <name-pattern> [-type f|d|l] [-path start-path]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-type f` | Match regular files only |
+| `-type d` | Match directories only |
+| `-type l` | Match symbolic links only |
+| `-path start-path` | Start searching from the specified directory (default: `/`) |
+
+**Pattern wildcards:**
+- `*` matches any sequence of characters
+- `?` matches any single character
+- Matching is case-insensitive
+
+**Features:**
+- Recursive search through the entire directory tree
+- Glob-style name pattern matching with `*` and `?` wildcards
+- Optional type filtering (files, directories, symlinks)
+- Optional starting path to narrow the search scope
+- Displays file type, size, and full path for each match
+- Supports both UFS1 and UFS2 filesystem formats
+
+**Examples:**
+```
+ufs2tool find myimage.img "*.txt"
+ufs2tool find myimage.img "game*" -type f
+ufs2tool find myimage.img "*" -type d
+ufs2tool find myimage.img "*.cfg" -path /etc
+```
+
+### `du` — Show disk usage
+
+Display disk usage for files and directories in a UFS1/UFS2 filesystem image, similar to FreeBSD's `du(1)`.
+
+**Synopsis:**
+```
+ufs2tool du [-h] [-s] [-d depth] <image-path> [fs-path]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-h` | Human-readable sizes (e.g., 1K, 234M, 2G) |
+| `-s` | Summary only (total for the specified path) |
+| `-d depth` | Maximum directory depth to report |
+
+**Features:**
+- Recursive disk usage calculation through the entire directory tree
+- Accumulated block counts for directories (includes all descendant files)
+- Maximum depth limiting to control output granularity
+- Summary-only mode for quick total usage
+- Human-readable size formatting
+- Supports both UFS1 and UFS2 filesystem formats
+- Output format matches FreeBSD `du(1)` convention (512-byte block counts)
+
+**Examples:**
+```
+ufs2tool du myimage.img
+ufs2tool du -h myimage.img
+ufs2tool du -s myimage.img
+ufs2tool du myimage.img /subdir
+ufs2tool du -d 1 myimage.img
+```
+
 ### `devinfo` — Show device information
 
 Displays Windows device information including total size and sector size for physical drives and volumes. Requires Administrator privileges.
@@ -392,6 +495,9 @@ ufs2tool umount_udf <drive-letter>
 - File and directory addition with inode allocation, block allocation, and directory entry creation
 - File and directory deletion with recursive content removal, block deallocation, and inode freeing
 - Permission modification (chmod) for individual files/directories and recursive whole-image operations
+- Detailed file/directory/symlink information display (stat) with permissions, timestamps, and block usage
+- Recursive file search (find) with glob pattern matching and type filtering
+- Disk usage calculation (du) with depth limiting, summary mode, and accumulated block counts
 - Filesystem summary information display
 
 ### Superblock (`Ufs2Superblock`)
@@ -452,6 +558,45 @@ ufs2tool umount_udf <drive-letter>
 - Pattern-based file search (`FindFilesWithPattern`)
 - File security descriptor queries (returns `NotImplemented` for Unix-based permissions)
 
+## GUI Application (`UFS2Tool.GUI`)
+
+Cross-platform desktop GUI built with [Avalonia UI](https://avaloniaui.net/) providing a graphical interface for all major UFS2Tool operations.
+
+### Tabs
+
+| Tab | Description |
+|-----|-------------|
+| Create Filesystem | Create UFS1/UFS2 images with configurable parameters (format, block/fragment size, sector size, volume name, flags) |
+| Filesystem Operations | List, extract, add, delete, replace, rename files, chmod, stat, find, and du operations |
+| Content Browser | Browse filesystem contents visually with tree navigation |
+| Maintenance | TuneFS, GrowFS, and FsckUFS operations |
+| Write Filesystem | Write UFS images to USB drives and physical devices with progress tracking and optional post-write verification |
+| Device & Mount | Mount/unmount UFS images as Windows drives via Dokan |
+| PS5 | PS5-compatible filesystem creation with single-folder and batch processing modes |
+| Settings | Language selection with automatic detection from OS locale |
+
+### PS5 Batch Processing (`PS5QuickCreateViewModel`)
+
+- **Single mode**: Create one PS5-compatible `.ffpkg` image from a directory using either `makefs` or `newfs`
+- **Batch mode**: Process multiple input directories in sequence, generating one image per folder
+- Automatic output filename derivation from source folder name
+- Output path collision detection with automatic suffix deduplication (`_2`, `_3`, etc.)
+- Parent directory auto-creation for custom output paths
+- Per-item status tracking (Processing, Done, Failed) displayed in the DataGrid
+- Progress counter showing current/total items during batch execution
+- Batch manipulation buttons (Add, Browse, Remove, Clear) disabled during processing to prevent concurrent modification
+- Duplicate folder detection when adding folders via the Browse dialog
+- Input validation: checks all items have input directories that exist before starting
+
+### Localization (`LocalizationManager`)
+
+- 26 supported languages: English, Français, Español, Deutsch, 中文 (简体), 中文 (繁體), 日本語, العربية, Русский, हिन्दी, 한국어, Türkçe, Italiano, Português, Português (Brasil), Svenska, Suomi, Polski, Tiếng Việt, Română, Українська, Čeština, ไทย, Nederlands, Bahasa Indonesia, Magyar
+- Automatic language detection from OS locale (`CultureInfo.CurrentUICulture`)
+- Locale-to-language mapping using ISO 639-1 two-letter codes and specific culture names (e.g., `pt-BR`, `zh-TW`, `zh-Hant`, `zh-Hans`)
+- Fallback to English for unrecognized locales
+- Dynamic language switching at runtime via the Settings tab
+- All UI strings (tab headers, labels, buttons, error messages, hints) are localized
+
 ## Test Suite
 
 The project includes a comprehensive test suite (`UFS2Tool.Tests`) with the following test classes:
@@ -468,5 +613,10 @@ The project includes a comprehensive test suite (`UFS2Tool.Tests`) with the foll
 | `ExtractTests` | Tests file extraction from UFS1/UFS2 filesystem images |
 | `ReplaceTests` | Tests file and directory replacement in UFS1/UFS2 filesystem images |
 | `AddDeleteTests` | Tests adding and deleting files and directories in UFS1/UFS2 filesystem images, including recursive operations, binary content preservation, and fsck validation |
+| `RenameTests` | Tests rename functionality: single files and directories in UFS1/UFS2 filesystems, content preservation, subdirectory renames, read-only protection, and input validation |
 | `ChmodTests` | Tests chmod functionality: single file/directory permission changes, recursive whole-image chmod, file type bit preservation, read-only rejection, and fsck validation for both UFS1 and UFS2 |
+| `StatTests` | Tests stat functionality: root directory, regular file, and subdirectory stat for both UFS1 and UFS2, permission display after chmod, and nonexistent path error handling |
+| `FindTests` | Tests find functionality: exact name matching, wildcard patterns (`*`, `?`), type filtering (files, directories), subdirectory searching, deep tree traversal, case-insensitive matching, no-match handling, and UFS1 support |
+| `DuTests` | Tests du functionality: root directory and subdirectory disk usage, single file usage, summary-only mode, max depth limiting, empty filesystem handling, block accumulation, nonexistent path errors, and UFS1 support |
+| `ProgressOutputTests` | Tests progress output formatting: single file addition messages, recursive directory addition messages, and null output stream handling |
 | `FsckUfsTests` | Tests fsck_ufs command: clean filesystem detection, CG magic/count validation, superblock count mismatches, populated filesystem checking, multi-CG images, and post-growfs/tunefs consistency |

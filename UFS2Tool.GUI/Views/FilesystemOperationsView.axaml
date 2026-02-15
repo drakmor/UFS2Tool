@@ -46,6 +46,12 @@
                         IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
                 <Button Content="{Binding Loc[Chmod]}" Command="{Binding ChmodCommand}"
                         IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[DiskUsage]}" Command="{Binding DiskUsageCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[Stat]}" Command="{Binding StatCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[Find]}" Command="{Binding FindCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
             </WrapPanel>
         </Border>
 
@@ -53,7 +59,7 @@
         <Border DockPanel.Dock="Top"
                 BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
                 CornerRadius="4" Padding="16" Margin="0,0,0,12">
-            <Grid ColumnDefinitions="140,*,16,140,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="8">
+            <Grid ColumnDefinitions="140,*,16,140,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="8">
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Loc[LocalPath]}" VerticalAlignment="Center"/>
                 <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding LocalPath}"
                          Watermark="{Binding Loc[LocalPathWatermark]}"/>
@@ -73,6 +79,14 @@
                 <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding Loc[NewName]}" VerticalAlignment="Center"/>
                 <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding NewName}"
                          Watermark="{Binding Loc[NewNameWatermark]}"/>
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="{Binding Loc[FindPattern]}" VerticalAlignment="Center"/>
+                <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding FindPattern}"
+                         Watermark="{Binding Loc[FindPatternWatermark]}"/>
+
+                <TextBlock Grid.Row="3" Grid.Column="3" Text="{Binding Loc[FindTypeFilter]}" VerticalAlignment="Center"/>
+                <TextBox Grid.Row="3" Grid.Column="4" Text="{Binding FindTypeFilter}"
+                         Watermark="{Binding Loc[FindTypeFilterWatermark]}" MaxWidth="120" HorizontalAlignment="Left"/>
             </Grid>
         </Border>
 
@@ -92,9 +106,12 @@
                               HeadersVisibility="Column"
                               CanUserResizeColumns="True">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Binding="{Binding Name}" Width="*"/>
-                            <DataGridTextColumn Binding="{Binding InodeNumber}" Width="100"/>
-                            <DataGridTextColumn Binding="{Binding FileTypeName}" Width="100"/>
+                            <DataGridTextColumn Header="{Binding $parent[UserControl].((vm:FilesystemOperationsViewModel)DataContext).Loc[Name]}"
+                                                Binding="{Binding Name}" Width="*"/>
+                            <DataGridTextColumn Header="{Binding $parent[UserControl].((vm:FilesystemOperationsViewModel)DataContext).Loc[Inode]}"
+                                                Binding="{Binding InodeNumber}" Width="100"/>
+                            <DataGridTextColumn Header="{Binding $parent[UserControl].((vm:FilesystemOperationsViewModel)DataContext).Loc[Type]}"
+                                                Binding="{Binding FileTypeName}" Width="100"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>

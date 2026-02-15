@@ -61,7 +61,8 @@ namespace UFS2Tool
             if (nameAreaSize > 0)
             {
                 byte[] nameBytes = reader.ReadBytes(nameAreaSize);
-                entry.Name = Encoding.ASCII.GetString(nameBytes, 0, entry.NameLength);
+                int nameLen = Math.Min(entry.NameLength, nameBytes.Length);
+                entry.Name = Encoding.ASCII.GetString(nameBytes, 0, nameLen);
             }
 
             return entry;

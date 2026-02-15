@@ -14,9 +14,14 @@ namespace UFS2Tool
     {
         private FileStream _stream;
         private BinaryReader _reader;
-        private BinaryWriter _writer;
+        private BinaryWriter? _writer;
 
-        public Ufs2Superblock Superblock { get; private set; }
+        /// <summary>
+        /// Gets the BinaryWriter, throwing if the image was opened read-only.
+        /// </summary>
+        private BinaryWriter Writer => _writer ?? throw new InvalidOperationException("Image is read-only.");
+
+        public Ufs2Superblock Superblock { get; private set; } = null!;
         public string ImagePath { get; }
         public bool IsReadOnly { get; }
 
@@ -36,7 +41,17 @@ namespace UFS2Tool
             if (!readOnly)
                 _writer = new BinaryWriter(_stream);
 
-            ReadSuperblock();
+            try
+            {
+                ReadSuperblock();
+            }
+            catch
+            {
+                _writer?.Dispose();
+                _reader.Dispose();
+                _stream.Dispose();
+                throw;
+            }
         }
 
         private void ReadSuperblock()
@@ -55,6 +70,11 @@ namespace UFS2Tool
         /// </summary>
         public Ufs2Inode ReadInode(uint inodeNumber)
         {
+            long totalInodes = (long)Superblock.NumCylGroups * Superblock.InodesPerGroup;
+            if (inodeNumber >= totalInodes)
+                throw new ArgumentOutOfRangeException(nameof(inodeNumber),
+                    $"Inode number {inodeNumber} exceeds total inodes ({totalInodes}).");
+
             int cgIndex = (int)(inodeNumber / Superblock.InodesPerGroup);
             int inodeIndexInCg = (int)(inodeNumber % Superblock.InodesPerGroup);
 
@@ -65,6 +85,11 @@ namespace UFS2Tool
             long inodeTableStart = cgStart + (long)Superblock.IblkNo * Superblock.FSize;
 
             long inodeOffset = inodeTableStart + (long)inodeIndexInCg * inodeSize;
+
+            if (inodeOffset < 0 || inodeOffset + inodeSize > _stream.Length)
+                throw new InvalidOperationException(
+                    $"Inode {inodeNumber} offset {inodeOffset} is outside the image bounds ({_stream.Length} bytes).");
+
             _stream.Position = inodeOffset;
 
             if (Superblock.IsUfs1)
@@ -216,14 +241,20 @@ namespace UFS2Tool
             // Direct blocks
             for (int i = 0; i < Ufs2Constants.NDirect && offset < inode.Size; i++)
             {
-                if (inode.DirectBlocks[i] == 0) continue;
+                long toAdvance = Math.Min(Superblock.BSize, inode.Size - offset);
+
+                if (inode.DirectBlocks[i] == 0)
+                {
+                    // Sparse hole: data is already zero-filled, just advance offset
+                    offset += toAdvance;
+                    continue;
+                }
 
                 long blockOffset = inode.DirectBlocks[i] * Superblock.FSize;
                 _stream.Position = blockOffset;
 
-                int toRead = (int)Math.Min(Superblock.BSize, inode.Size - offset);
-                _stream.Read(data, (int)offset, toRead);
-                offset += toRead;
+                ReadFully(data, (int)offset, (int)toAdvance);
+                offset += toAdvance;
             }
 
             // Single indirect
@@ -254,18 +285,22 @@ namespace UFS2Tool
 
             int ptrSize = Superblock.IsUfs1 ? 4 : 8; // UFS1: 32-bit, UFS2: 64-bit
             int pointersPerBlock = Superblock.BSize / ptrSize;
-            var ptrReader = new BinaryReader(_stream);
 
             for (int i = 0; i < pointersPerBlock && offset < fileSize; i++)
             {
-                long ptr = Superblock.IsUfs1 ? ptrReader.ReadInt32() : ptrReader.ReadInt64();
-                if (ptr == 0) continue;
+                long ptr = Superblock.IsUfs1 ? _reader.ReadInt32() : _reader.ReadInt64();
+                if (ptr == 0)
+                {
+                    // Sparse hole: data is already zero-filled, just advance offset
+                    offset += Math.Min(Superblock.BSize, fileSize - offset);
+                    continue;
+                }
 
                 long dataOffset = ptr * Superblock.FSize;
                 _stream.Position = dataOffset;
 
                 int toRead = (int)Math.Min(Superblock.BSize, fileSize - offset);
-                _stream.Read(data, (int)offset, toRead);
+                ReadFully(data, (int)offset, toRead);
                 offset += toRead;
 
                 // Restore position for next pointer
@@ -282,12 +317,16 @@ namespace UFS2Tool
 
             int ptrSize = Superblock.IsUfs1 ? 4 : 8;
             int pointersPerBlock = Superblock.BSize / ptrSize;
-            var ptrReader = new BinaryReader(_stream);
 
             for (int i = 0; i < pointersPerBlock && offset < fileSize; i++)
             {
-                long ptr = Superblock.IsUfs1 ? ptrReader.ReadInt32() : ptrReader.ReadInt64();
-                if (ptr == 0) continue;
+                long ptr = Superblock.IsUfs1 ? _reader.ReadInt32() : _reader.ReadInt64();
+                if (ptr == 0)
+                {
+                    // Sparse hole: skip entire indirect block's worth of data
+                    offset = Math.Min(offset + (long)pointersPerBlock * Superblock.BSize, fileSize);
+                    continue;
+                }
 
                 offset = ReadIndirectBlock(ptr, data, offset, fileSize);
 
@@ -305,12 +344,16 @@ namespace UFS2Tool
 
             int ptrSize = Superblock.IsUfs1 ? 4 : 8;
             int pointersPerBlock = Superblock.BSize / ptrSize;
-            var ptrReader = new BinaryReader(_stream);
 
             for (int i = 0; i < pointersPerBlock && offset < fileSize; i++)
             {
-                long ptr = Superblock.IsUfs1 ? ptrReader.ReadInt32() : ptrReader.ReadInt64();
-                if (ptr == 0) continue;
+                long ptr = Superblock.IsUfs1 ? _reader.ReadInt32() : _reader.ReadInt64();
+                if (ptr == 0)
+                {
+                    // Sparse hole: skip entire double-indirect block's worth of data
+                    offset = Math.Min(offset + (long)pointersPerBlock * pointersPerBlock * Superblock.BSize, fileSize);
+                    continue;
+                }
 
                 offset = ReadDoubleIndirectBlock(ptr, data, offset, fileSize);
 
@@ -331,8 +374,8 @@ namespace UFS2Tool
                 throw new InvalidOperationException("Cannot write superblock: image is opened read-only.");
 
             _stream.Position = Ufs2Constants.SuperblockOffset;
-            Superblock.WriteTo(_writer);
-            _writer.Flush();
+            Superblock.WriteTo(Writer);
+            Writer.Flush();
         }
 
         /// <summary>
@@ -357,11 +400,11 @@ namespace UFS2Tool
                     cgStartByte + (long)usableFragsInCg * Superblock.FSize)
                 {
                     _stream.Position = backupSbOffset;
-                    Superblock.WriteTo(_writer);
+                    Superblock.WriteTo(Writer);
                 }
             }
 
-            _writer.Flush();
+            Writer.Flush();
         }
 
         /// <summary>
@@ -398,6 +441,339 @@ namespace UFS2Tool
                 Flags: {flagStr}
                 Last Modified: {DateTimeOffset.FromUnixTimeSeconds(Superblock.Time):u}
                 """;
+        }
+
+        /// <summary>
+        /// Get detailed file/directory/symlink information (like Unix stat(1)).
+        /// </summary>
+        public string GetStat(string fsPath)
+        {
+            uint inodeNumber = ResolvePath(fsPath);
+            Ufs2Inode inode = ReadInode(inodeNumber);
+
+            string fileType = (inode.Mode & 0xF000) switch
+            {
+                Ufs2Constants.IfDir => "Directory",
+                Ufs2Constants.IfReg => "Regular File",
+                Ufs2Constants.IfLnk => "Symbolic Link",
+                0x1000 => "FIFO",
+                0x2000 => "Character Device",
+                0x6000 => "Block Device",
+                0xC000 => "Socket",
+                _ => "Unknown"
+            };
+
+            ushort permBits = (ushort)(inode.Mode & 0x0FFF);
+            string symbolicMode = FormatSymbolicMode(inode.Mode);
+
+            string atime = inode.AccessTime != 0
+                ? DateTimeOffset.FromUnixTimeSeconds(inode.AccessTime).ToString("u")
+                : "-";
+            string mtime = inode.ModTime != 0
+                ? DateTimeOffset.FromUnixTimeSeconds(inode.ModTime).ToString("u")
+                : "-";
+            string ctime = inode.ChangeTime != 0
+                ? DateTimeOffset.FromUnixTimeSeconds(inode.ChangeTime).ToString("u")
+                : "-";
+            string btime = inode.CreateTime != 0
+                ? DateTimeOffset.FromUnixTimeSeconds(inode.CreateTime).ToString("u")
+                : "-";
+
+            int directBlocksUsed = 0;
+            for (int i = 0; i < Ufs2Constants.NDirect; i++)
+            {
+                if (inode.DirectBlocks[i] != 0)
+                    directBlocksUsed++;
+            }
+
+            int indirectBlocksUsed = 0;
+            for (int i = 0; i < Ufs2Constants.NIndirect; i++)
+            {
+                if (inode.IndirectBlocks[i] != 0)
+                    indirectBlocksUsed++;
+            }
+
+            return $"""
+                  File: {fsPath}
+                  Type: {fileType}
+                 Inode: {inodeNumber}
+                  Mode: ({Convert.ToString(permBits, 8).PadLeft(4, '0')}/{symbolicMode})
+                 Links: {inode.NLink}
+                   Uid: {inode.Uid}
+                   Gid: {inode.Gid}
+                  Size: {inode.Size}
+                Blocks: {inode.Blocks}
+                BlkSiz: {inode.BlkSize}
+                Access: {atime}
+                Modify: {mtime}
+                Change: {ctime}
+                 Birth: {btime}
+                Direct: {directBlocksUsed}/{Ufs2Constants.NDirect} blocks
+                Indrct: {indirectBlocksUsed}/{Ufs2Constants.NIndirect} blocks
+                """;
+        }
+
+        /// <summary>
+        /// Represents a single result from a filesystem find operation.
+        /// </summary>
+        public sealed class FindResult
+        {
+            /// <summary>Full path within the filesystem (e.g., "/dir/file.txt").</summary>
+            public string Path { get; }
+
+            /// <summary>Directory entry file type constant (DtDir, DtReg, DtLnk, etc.).</summary>
+            public byte FileType { get; }
+
+            /// <summary>Inode number of the entry.</summary>
+            public uint Inode { get; }
+
+            /// <summary>File size in bytes (from inode).</summary>
+            public long Size { get; }
+
+            public FindResult(string path, byte fileType, uint inode, long size)
+            {
+                Path = path;
+                FileType = fileType;
+                Inode = inode;
+                Size = size;
+            }
+        }
+
+        /// <summary>
+        /// Search for files and directories matching a name pattern within the filesystem.
+        /// Supports glob-style wildcards: '*' matches any sequence of characters,
+        /// '?' matches any single character.
+        /// </summary>
+        /// <param name="namePattern">Glob pattern to match entry names (e.g., "*.txt", "game*", "?ata").</param>
+        /// <param name="startPath">Filesystem path to start searching from (default: "/").</param>
+        /// <param name="typeFilter">
+        /// Optional type filter: 'f' for regular files, 'd' for directories, 'l' for symlinks.
+        /// Null or empty means all types.
+        /// </param>
+        /// <returns>List of matching entries with path, type, inode, and size.</returns>
+        public List<FindResult> Find(string namePattern, string startPath = "/", string? typeFilter = null)
+        {
+            uint startInode = ResolvePath(startPath);
+            var results = new List<FindResult>();
+            FindRecursive(startInode, startPath == "/" ? "" : startPath, namePattern, typeFilter, results);
+            return results;
+        }
+
+        /// <summary>
+        /// Recursively walk the directory tree and collect entries matching the pattern and type filter.
+        /// </summary>
+        private void FindRecursive(uint dirInodeNumber, string currentPath, string namePattern, string? typeFilter, List<FindResult> results)
+        {
+            var entries = ListDirectory(dirInodeNumber);
+
+            foreach (var entry in entries)
+            {
+                if (entry.Name == "." || entry.Name == "..")
+                    continue;
+
+                string entryPath = currentPath + "/" + entry.Name;
+
+                // Check if this entry matches the type filter and name pattern
+                bool typeMatches = string.IsNullOrEmpty(typeFilter) || typeFilter switch
+                {
+                    "f" => entry.FileType == Ufs2Constants.DtReg,
+                    "d" => entry.FileType == Ufs2Constants.DtDir,
+                    "l" => entry.FileType == Ufs2Constants.DtLnk,
+                    _ => true
+                };
+
+                if (typeMatches && GlobMatch(namePattern, entry.Name))
+                {
+                    var inode = ReadInode(entry.Inode);
+                    results.Add(new FindResult(entryPath, entry.FileType, entry.Inode, inode.Size));
+                }
+
+                // Recurse into subdirectories
+                if (entry.FileType == Ufs2Constants.DtDir)
+                {
+                    FindRecursive(entry.Inode, entryPath, namePattern, typeFilter, results);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Represents a single result from a filesystem disk usage calculation.
+        /// </summary>
+        public sealed class DiskUsageEntry
+        {
+            /// <summary>Full path within the filesystem (e.g., "/dir").</summary>
+            public string Path { get; }
+
+            /// <summary>Logical size in bytes (sum of file sizes).</summary>
+            public long Bytes { get; }
+
+            /// <summary>Disk blocks consumed (512-byte units, matching du(1) convention).</summary>
+            public long Blocks { get; }
+
+            /// <summary>Whether this entry is a directory.</summary>
+            public bool IsDirectory { get; }
+
+            public DiskUsageEntry(string path, long bytes, long blocks, bool isDirectory)
+            {
+                Path = path;
+                Bytes = bytes;
+                Blocks = blocks;
+                IsDirectory = isDirectory;
+            }
+        }
+
+        /// <summary>
+        /// Calculate disk usage for a path within the filesystem, similar to du(1).
+        /// Returns a list of entries with their accumulated sizes.
+        /// </summary>
+        /// <param name="fsPath">Filesystem path to measure (default: "/").</param>
+        /// <param name="maxDepth">Maximum directory depth to report (-1 for unlimited).</param>
+        /// <param name="summaryOnly">If true, only report the top-level total.</param>
+        /// <returns>List of disk usage entries sorted by path.</returns>
+        public List<DiskUsageEntry> DiskUsage(string fsPath = "/", int maxDepth = -1, bool summaryOnly = false)
+        {
+            uint startInode = ResolvePath(fsPath);
+            Ufs2Inode inode = ReadInode(startInode);
+            string basePath = fsPath == "/" ? "/" : fsPath.TrimEnd('/');
+
+            var results = new List<DiskUsageEntry>();
+
+            if (inode.IsDirectory)
+            {
+                DiskUsageRecursive(startInode, basePath, 0, maxDepth, summaryOnly, results);
+            }
+            else
+            {
+                // Single file: report its usage directly
+                long blocks = inode.Blocks;
+                results.Add(new DiskUsageEntry(basePath, inode.Size, blocks, false));
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// Recursively calculate disk usage for a directory tree.
+        /// Returns the total (bytes, blocks) consumed by this directory and its contents.
+        /// </summary>
+        private (long bytes, long blocks) DiskUsageRecursive(
+            uint dirInodeNumber, string currentPath, int currentDepth,
+            int maxDepth, bool summaryOnly, List<DiskUsageEntry> results)
+        {
+            var entries = ListDirectory(dirInodeNumber);
+            var dirInode = ReadInode(dirInodeNumber);
+
+            // Start with the directory's own block usage
+            long totalBytes = 0;
+            long totalBlocks = dirInode.Blocks;
+
+            foreach (var entry in entries)
+            {
+                if (entry.Name == "." || entry.Name == "..")
+                    continue;
+
+                string entryPath = currentPath == "/" ? "/" + entry.Name : currentPath + "/" + entry.Name;
+                var entryInode = ReadInode(entry.Inode);
+
+                if (entry.FileType == Ufs2Constants.DtDir)
+                {
+                    var (childBytes, childBlocks) = DiskUsageRecursive(
+                        entry.Inode, entryPath, currentDepth + 1,
+                        maxDepth, summaryOnly, results);
+                    totalBytes += childBytes;
+                    totalBlocks += childBlocks;
+                }
+                else
+                {
+                    totalBytes += entryInode.Size;
+                    totalBlocks += entryInode.Blocks;
+                }
+            }
+
+            // Decide whether to add this directory to results
+            if (summaryOnly)
+            {
+                // Only the top-level directory (depth 0) is added by the caller check below
+                if (currentDepth == 0)
+                    results.Add(new DiskUsageEntry(currentPath, totalBytes, totalBlocks, true));
+            }
+            else if (maxDepth < 0 || currentDepth <= maxDepth)
+            {
+                results.Add(new DiskUsageEntry(currentPath, totalBytes, totalBlocks, true));
+            }
+
+            return (totalBytes, totalBlocks);
+        }
+
+        /// <summary>
+        /// Match a string against a glob pattern supporting '*' (any sequence) and '?' (single character).
+        /// </summary>
+        private static bool GlobMatch(string pattern, string text)
+        {
+            int pi = 0, ti = 0;
+            int starPi = -1, starTi = -1;
+
+            while (ti < text.Length)
+            {
+                if (pi < pattern.Length && (pattern[pi] == '?' || char.ToLowerInvariant(pattern[pi]) == char.ToLowerInvariant(text[ti])))
+                {
+                    pi++;
+                    ti++;
+                }
+                else if (pi < pattern.Length && pattern[pi] == '*')
+                {
+                    starPi = pi;
+                    starTi = ti;
+                    pi++;
+                }
+                else if (starPi >= 0)
+                {
+                    pi = starPi + 1;
+                    starTi++;
+                    ti = starTi;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+
+            while (pi < pattern.Length && pattern[pi] == '*')
+                pi++;
+
+            return pi == pattern.Length;
+        }
+
+        /// <summary>
+        /// Format an inode mode value as a symbolic permission string (e.g., "drwxr-xr-x").
+        /// </summary>
+        private static string FormatSymbolicMode(ushort mode)
+        {
+            char typeChar = (mode & 0xF000) switch
+            {
+                Ufs2Constants.IfDir => 'd',
+                Ufs2Constants.IfReg => '-',
+                Ufs2Constants.IfLnk => 'l',
+                0x1000 => 'p',
+                0x2000 => 'c',
+                0x6000 => 'b',
+                0xC000 => 's',
+                _ => '?'
+            };
+
+            return string.Create(10, (typeChar, mode), static (span, state) =>
+            {
+                span[0] = state.typeChar;
+                span[1] = (state.mode & 0x100) != 0 ? 'r' : '-';
+                span[2] = (state.mode & 0x080) != 0 ? 'w' : '-';
+                span[3] = (state.mode & 0x040) != 0 ? 'x' : '-';
+                span[4] = (state.mode & 0x020) != 0 ? 'r' : '-';
+                span[5] = (state.mode & 0x010) != 0 ? 'w' : '-';
+                span[6] = (state.mode & 0x008) != 0 ? 'x' : '-';
+                span[7] = (state.mode & 0x004) != 0 ? 'r' : '-';
+                span[8] = (state.mode & 0x002) != 0 ? 'w' : '-';
+                span[9] = (state.mode & 0x001) != 0 ? 'x' : '-';
+            });
         }
 
         /// <summary>
@@ -516,6 +892,11 @@ namespace UFS2Tool
             if (IsReadOnly)
                 throw new InvalidOperationException("Cannot write inode: image is opened read-only.");
 
+            long totalInodes = (long)Superblock.NumCylGroups * Superblock.InodesPerGroup;
+            if (inodeNumber >= totalInodes)
+                throw new ArgumentOutOfRangeException(nameof(inodeNumber),
+                    $"Inode number {inodeNumber} exceeds total inodes ({totalInodes}).");
+
             int cgIndex = (int)(inodeNumber / Superblock.InodesPerGroup);
             int inodeIndexInCg = (int)(inodeNumber % Superblock.InodesPerGroup);
 
@@ -531,13 +912,13 @@ namespace UFS2Tool
             if (Superblock.IsUfs1)
             {
                 var ufs1 = ConvertUfs2ToUfs1Inode(inode);
-                ufs1.WriteTo(_writer);
+                ufs1.WriteTo(Writer);
             }
             else
             {
-                inode.WriteTo(_writer);
+                inode.WriteTo(Writer);
             }
-            _writer.Flush();
+            Writer.Flush();
         }
 
         /// <summary>
@@ -1143,7 +1524,7 @@ namespace UFS2Tool
 
                 for (int i = 0; i < inodesPerGroup; i++)
                 {
-                    uint globalIno = (uint)(cgIndex * inodesPerGroup + i);
+                    uint globalIno = (uint)((long)cgIndex * inodesPerGroup + i);
                     // Skip reserved inodes 0 and 1
                     if (globalIno <= 1) continue;
                     // Skip root inode (inode 2 in CG 0)
@@ -1373,7 +1754,7 @@ namespace UFS2Tool
             long lastBlockOffset = lastBlockFrag * Superblock.FSize;
             byte[] blockData = new byte[blockSize];
             _stream.Position = lastBlockOffset;
-            _stream.Read(blockData, 0, blockSize);
+            ReadFully(blockData, 0, blockSize);
 
             // Try to find space in the last DIRBLKSIZ-sized region of the last block
             int dirBlkSize = Ufs2Constants.DirBlockSize;
@@ -1442,6 +1823,36 @@ namespace UFS2Tool
                 pos = nextPos;
             }
 
+            // No space in last DIRBLKSIZ region.
+            // Check if the current block has room for another DIRBLKSIZ region.
+            if (bytesInLastBlock > 0 && bytesInLastBlock + dirBlkSize <= blockSize)
+            {
+                // Grow within existing block: initialize next DIRBLKSIZ region
+                int newRegionStart = (int)bytesInLastBlock;
+                var newEntry = new Ufs2DirectoryEntry
+                {
+                    Inode = entryInodeNumber,
+                    RecordLength = (ushort)dirBlkSize,
+                    FileType = fileType,
+                    NameLength = (byte)name.Length,
+                    Name = name
+                };
+                using (var wms = new MemoryStream(blockData, newRegionStart, dirBlkSize))
+                using (var w = new BinaryWriter(wms))
+                {
+                    newEntry.WriteTo(w);
+                }
+
+                _stream.Position = lastBlockOffset;
+                _stream.Write(blockData, 0, blockSize);
+
+                dirInode.Size += dirBlkSize;
+                dirInode.ModTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                dirInode.ChangeTime = dirInode.ModTime;
+                WriteInode(dirInodeNumber, dirInode);
+                return;
+            }
+
             // No space in existing blocks — allocate a new block
             int cgIndex = (int)(dirInodeNumber / Superblock.InodesPerGroup);
             long newBlockFrag = AllocateBlock(cgIndex);
@@ -1499,9 +1910,9 @@ namespace UFS2Tool
                         long indBlockOffset = dirInode.IndirectBlocks[0] * Superblock.FSize;
                         _stream.Position = indBlockOffset + (long)indirectIndex * ptrSize;
                         if (Superblock.IsUfs1)
-                            _writer.Write((int)newBlockFrag);
+                            Writer.Write((int)newBlockFrag);
                         else
-                            _writer.Write(newBlockFrag);
+                            Writer.Write(newBlockFrag);
                     }
                 }
             }
@@ -1603,7 +2014,7 @@ namespace UFS2Tool
                 long blockOffset = blockFrag * Superblock.FSize;
                 byte[] blockData = new byte[blockSize];
                 _stream.Position = blockOffset;
-                _stream.Read(blockData, 0, blockSize);
+                ReadFully(blockData, 0, blockSize);
 
                 long bytesInBlock = Math.Min(blockSize, dirSize - (long)bi * blockSize);
 
@@ -2285,7 +2696,7 @@ namespace UFS2Tool
             // Read existing CG summary data
             byte[] oldCsSummary = new byte[oldCsSize];
             _stream.Position = sb.CsAddr * fragSize;
-            _stream.Read(oldCsSummary, 0, oldCsSize);
+            ReadFully(oldCsSummary, 0, oldCsSize);
 
             // Prepare new CG summary array (block-aligned for writes)
             int newCsFragsBlk = ((newCsSize + blockSize - 1) / blockSize) * fragsPerBlock;
@@ -2613,8 +3024,8 @@ namespace UFS2Tool
 
             // Write primary superblock
             _stream.Position = Ufs2Constants.SuperblockOffset;
-            sb.WriteTo(_writer);
-            _writer.Flush();
+            sb.WriteTo(Writer);
+            Writer.Flush();
 
             // Write backup superblocks to all CGs
             for (int cg = 1; cg < newNumCg; cg++)
@@ -2628,10 +3039,10 @@ namespace UFS2Tool
                     cgStartFrag * fragSize + (long)usable * fragSize)
                 {
                     _stream.Position = backupSbOffset;
-                    sb.WriteTo(_writer);
+                    sb.WriteTo(Writer);
                 }
             }
-            _writer.Flush();
+            Writer.Flush();
 
             // Re-read to update in-memory state
             ReadSuperblock();
@@ -2647,7 +3058,7 @@ namespace UFS2Tool
             int cgSize = Superblock.CgSize;
             byte[] data = new byte[cgSize];
             _stream.Position = offset;
-            _stream.Read(data, 0, cgSize);
+            ReadFully(data, 0, cgSize);
             return data;
         }
 
@@ -3058,7 +3469,11 @@ namespace UFS2Tool
                 return result;
             }
 
-            int totalInodes = sb.NumCylGroups * sb.InodesPerGroup;
+            long totalInodesLong = (long)sb.NumCylGroups * sb.InodesPerGroup;
+            if (totalInodesLong > int.MaxValue)
+                throw new InvalidOperationException(
+                    $"Filesystem has too many inodes ({totalInodesLong}) for fsck to handle.");
+            int totalInodes = (int)totalInodesLong;
             int inodeSize = sb.IsUfs1 ? Ufs2Constants.Ufs1InodeSize : Ufs2Constants.Ufs2InodeSize;
             long totalFrags = sb.TotalBlocks;
             int fragsPerBlock = sb.FragsPerBlock;
@@ -3405,7 +3820,7 @@ namespace UFS2Tool
                 int actualFree = 0;
                 for (int i = 0; i < sb.InodesPerGroup; i++)
                 {
-                    uint globalIno = (uint)(cg * sb.InodesPerGroup + i);
+                    uint globalIno = (uint)((long)cg * sb.InodesPerGroup + i);
                     if (globalIno >= (uint)totalInodes) break;
 
                     int byteIdx = iusedoff + i / 8;
@@ -3491,6 +3906,24 @@ namespace UFS2Tool
                 $"({result.Fragmentation:F1}% fragmentation)");
 
             return result;
+        }
+
+        /// <summary>
+        /// Read exactly the requested number of bytes from the stream.
+        /// Unlike Stream.Read, this loops until all bytes are read.
+        /// Throws if end-of-stream is reached before all bytes are read.
+        /// </summary>
+        private void ReadFully(byte[] buffer, int offset, int count)
+        {
+            int totalRead = 0;
+            while (totalRead < count)
+            {
+                int bytesRead = _stream.Read(buffer, offset + totalRead, count - totalRead);
+                if (bytesRead == 0)
+                    throw new EndOfStreamException(
+                        $"Unexpected end of stream: expected {count} bytes at offset {_stream.Position - totalRead}, got {totalRead}.");
+                totalRead += bytesRead;
+            }
         }
 
         public void Dispose()

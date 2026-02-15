@@ -1,0 +1,80 @@
+<!-- Copyright (c) 2026, SvenGDK -->
+<!-- Licensed under the BSD 2-Clause License. See LICENSE file for details. -->
+
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UFS2Tool.GUI.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+             x:Class="UFS2Tool.GUI.Views.ContentBrowserView"
+             x:DataType="vm:ContentBrowserViewModel">
+
+    <DockPanel Margin="16">
+
+        <!-- Image Path -->
+        <Border DockPanel.Dock="Top"
+                BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                CornerRadius="4" Padding="16" Margin="0,0,0,12">
+            <Grid ColumnDefinitions="100,*,Auto,16,Auto" ColumnSpacing="8">
+                <TextBlock Grid.Column="0" Text="{Binding Loc[ImagePath]}" VerticalAlignment="Center"/>
+                <TextBox Grid.Column="1" Text="{Binding ImagePath}"
+                         Watermark="{Binding Loc[ImagePathFSWatermark]}"/>
+                <Button Grid.Column="2" Content="..." Click="BrowseImagePath_Click"
+                        Padding="12,6"/>
+                <Button Grid.Column="4" Content="{Binding Loc[BrowserLoad]}"
+                        Command="{Binding LoadImageCommand}"
+                        IsEnabled="{Binding !IsRunning}" Padding="14,6"/>
+            </Grid>
+        </Border>
+
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top" Margin="0,0,0,12">
+            <WrapPanel Orientation="Horizontal">
+                <Button Content="{Binding Loc[BrowserRefresh]}" Command="{Binding LoadImageCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[BrowserExtract]}" Click="ExtractSelected_Click"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[BrowserAddFile]}" Click="AddFile_Click"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[BrowserAddFolder]}" Click="AddFolder_Click"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+                <Button Content="{Binding Loc[Delete]}" Command="{Binding DeleteSelectedCommand}"
+                        IsEnabled="{Binding !IsRunning}" Margin="0,0,6,4" Padding="14,6"/>
+            </WrapPanel>
+        </Border>
+
+        <!-- Status Bar -->
+        <Border DockPanel.Dock="Bottom" Margin="0,8,0,0" Padding="4">
+            <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{DynamicResource SystemBaseMediumColor}"/>
+        </Border>
+
+        <!-- Tree View -->
+        <Border BorderBrush="{DynamicResource SystemBaseMediumLowColor}" BorderThickness="1"
+                CornerRadius="4" Padding="0">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="{Binding Loc[BrowserContents]}" FontWeight="SemiBold"
+                           FontSize="14" Margin="12,8,12,4"/>
+                <TreeView x:Name="ContentTree"
+                          ItemsSource="{Binding RootNodes}"
+                          SelectedItem="{Binding SelectedNode}"
+                          DragDrop.AllowDrop="True"
+                          Margin="4">
+                    <TreeView.Styles>
+                        <Style Selector="TreeViewItem" x:DataType="vm:FileTreeNodeItem">
+                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                        </Style>
+                    </TreeView.Styles>
+                    <TreeView.ItemTemplate>
+                        <TreeDataTemplate ItemsSource="{Binding Children}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="{Binding Icon}" FontSize="14" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </TreeDataTemplate>
+                    </TreeView.ItemTemplate>
+                </TreeView>
+            </DockPanel>
+        </Border>
+    </DockPanel>
+</UserControl>

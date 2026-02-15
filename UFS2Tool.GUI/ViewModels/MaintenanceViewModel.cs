@@ -104,9 +104,16 @@ public partial class MaintenanceViewModel : ViewModelBase
 
                 if (!string.IsNullOrWhiteSpace(TuneMinFreePercent) && int.TryParse(TuneMinFreePercent, out int minfree))
                 {
-                    LogMessage($"[TuneFS] Minimum free space: {sb.MinFreePercent}% -> {minfree}%");
-                    sb.MinFreePercent = minfree;
-                    modified = true;
+                    if (minfree < 0 || minfree > 99)
+                    {
+                        LogMessage("[TuneFS] Error: Minimum free percent must be between 0 and 99.");
+                    }
+                    else
+                    {
+                        LogMessage($"[TuneFS] Minimum free space: {sb.MinFreePercent}% -> {minfree}%");
+                        sb.MinFreePercent = minfree;
+                        modified = true;
+                    }
                 }
 
                 if (!string.IsNullOrWhiteSpace(TuneOptimization))
@@ -135,7 +142,7 @@ public partial class MaintenanceViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            _outputLog.Add($"[Error] {ex.Message}");
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
         }
         finally { IsRunning = false; }
     }
@@ -144,6 +151,11 @@ public partial class MaintenanceViewModel : ViewModelBase
     private async Task GrowFilesystemAsync()
     {
         if (!ValidateImagePath()) return;
+        if (NewSizeInMB <= 0)
+        {
+            _outputLog.Add("[Error] New size must be greater than 0 MB.");
+            return;
+        }
         IsRunning = true;
         _outputLog.Add($"[GrowFS] Growing filesystem '{ImagePath}' to {NewSizeInMB} MB{(GrowDryRun ? " (dry run)" : "")}...");
         try
@@ -164,7 +176,7 @@ public partial class MaintenanceViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            _outputLog.Add($"[Error] {ex.Message}");
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
         }
         finally { IsRunning = false; }
     }
@@ -209,7 +221,7 @@ public partial class MaintenanceViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            _outputLog.Add($"[Error] {ex.Message}");
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
         }
         finally { IsRunning = false; }
     }

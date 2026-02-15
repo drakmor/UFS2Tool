@@ -111,7 +111,10 @@ public sealed class LogTextWriter : TextWriter
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
             Flush();
+            _buffer.Clear();
+        }
         base.Dispose(disposing);
     }
 }

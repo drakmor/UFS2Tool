@@ -51,6 +51,12 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
     private bool _chmodRecursive;
 
     [ObservableProperty]
+    private string _findPattern = "";
+
+    [ObservableProperty]
+    private string _findTypeFilter = "";
+
+    [ObservableProperty]
     private bool _isRunning;
 
     [ObservableProperty]
@@ -83,7 +89,7 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            _outputLog.Add($"[Error] {ex.Message}");
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
         }
         finally { IsRunning = false; }
     }
@@ -135,7 +141,7 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            _outputLog.Add($"[Error] {ex.Message}");
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
         }
         finally { IsRunning = false; }
     }
@@ -157,15 +163,16 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
             await Task.Run(() =>
             {
                 using var image = new Ufs2Image(ImagePath, readOnly: true);
-                var inode = image.ReadInode(image.ResolvePath(FsPath ?? "/"));
+                string targetPath = string.IsNullOrWhiteSpace(FsPath) ? "/" : FsPath;
+                var inode = image.ReadInode(image.ResolvePath(targetPath));
                 extractType = inode.IsDirectory ? "directory" : "file";
-                image.Extract(FsPath ?? "/", OutputDirectory);
+                image.Extract(targetPath, OutputDirectory);
             });
             _outputLog.Add($"[Extract] Successfully extracted {extractType} '{FsPath}' to '{OutputDirectory}'.");
         }
         catch (Exception ex)
         {
-            _outputLog.Add($"[Error] {ex.Message}");
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
         }
         finally { IsRunning = false; }
     }
@@ -189,13 +196,14 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
                 using var logWriter = new LogTextWriter(_outputLog);
                 using var image = new Ufs2Image(ImagePath);
                 image.Output = logWriter;
-                image.Add(FsPath ?? "/", LocalPath);
+                string targetPath = string.IsNullOrWhiteSpace(FsPath) ? "/" : FsPath;
+                image.Add(targetPath, LocalPath);
             });
             _outputLog.Add($"[Add] Successfully added '{LocalPath}' to '{FsPath}'.");
         }
         catch (Exception ex)
         {
-            _outputLog.Add($"[Error] {ex.Message}");
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
         }
         finally { IsRunning = false; }
     }
@@ -222,7 +230,7 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            _outputLog.Add($"[Error] {ex.Message}");
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
         }
         finally { IsRunning = false; }
     }
@@ -254,7 +262,7 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            _outputLog.Add($"[Error] {ex.Message}");
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
         }
         finally { IsRunning = false; }
     }
@@ -281,7 +289,7 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            _outputLog.Add($"[Error] {ex.Message}");
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
         }
         finally { IsRunning = false; }
     }
@@ -295,45 +303,198 @@ public partial class FilesystemOperationsViewModel : ViewModelBase
             _outputLog.Add("[Error] Please specify a chmod mode (e.g., 755).");
             return;
         }
+
+        ushort mode;
+        try
+        {
+            mode = Convert.ToUInt16(ChmodMode, 8);
+        }
+        catch (FormatException)
+        {
+            _outputLog.Add($"[Error] Invalid octal mode: '{ChmodMode}'. Use octal digits (0-7), e.g. 755.");
+            return;
+        }
+        catch (OverflowException)
+        {
+            _outputLog.Add($"[Error] Mode value '{ChmodMode}' is out of range. Maximum is 7777.");
+            return;
+        }
+
         IsRunning = true;
         _outputLog.Add($"[Chmod] Changing permissions of '{FsPath}' to {ChmodMode}{(ChmodRecursive ? " (recursive)" : "")} in '{ImagePath}'...");
         try
         {
             await Task.Run(() =>
             {
-                ushort mode;
-                try
-                {
-                    mode = Convert.ToUInt16(ChmodMode, 8);
-                }
-                catch (FormatException)
-                {
-                    _outputLog.Add($"[Error] Invalid octal mode: '{ChmodMode}'. Use octal digits (0-7), e.g. 755.");
-                    return;
-                }
-                catch (OverflowException)
-                {
-                    _outputLog.Add($"[Error] Mode value '{ChmodMode}' is out of range. Maximum is 7777.");
-                    return;
-                }
                 using var image = new Ufs2Image(ImagePath);
                 if (ChmodRecursive)
                 {
-                    // Apply same mode to both files and directories
-                    image.ChmodAll(mode, mode);
+                    ushort dirMode = AddExecuteBits(mode);
+                    image.ChmodAll(mode, dirMode);
                 }
                 else
                 {
-                    image.Chmod(FsPath ?? "/", mode);
+                    string targetPath = string.IsNullOrWhiteSpace(FsPath) ? "/" : FsPath;
+                    image.Chmod(targetPath, mode);
                 }
             });
             _outputLog.Add($"[Chmod] Successfully changed permissions of '{FsPath}' to {ChmodMode}{(ChmodRecursive ? " (recursive)" : "")}.");
         }
         catch (Exception ex)
         {
-            _outputLog.Add($"[Error] {ex.Message}");
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
         }
         finally { IsRunning = false; }
+    }
+
+    /// <summary>
+    /// Add execute bits to a file mode for use as a directory mode.
+    /// If user/group/other has read permission, add the corresponding execute permission.
+    /// </summary>
+    private static ushort AddExecuteBits(ushort fileMode)
+    {
+        ushort dirMode = fileMode;
+        if ((dirMode & 0x100) != 0) dirMode |= 0x040; // user read (0400) → user execute (0100)
+        if ((dirMode & 0x020) != 0) dirMode |= 0x008; // group read (0040) → group execute (0010)
+        if ((dirMode & 0x004) != 0) dirMode |= 0x001; // other read (0004) → other execute (0001)
+        return dirMode;
+    }
+
+    [RelayCommand]
+    private async Task StatAsync()
+    {
+        if (!ValidateImagePath()) return;
+        if (string.IsNullOrWhiteSpace(FsPath))
+        {
+            _outputLog.Add("[Error] Please specify a filesystem path to stat.");
+            return;
+        }
+        IsRunning = true;
+        _outputLog.Add($"[Stat] Getting file information for '{FsPath}' in '{ImagePath}'...");
+        try
+        {
+            string statInfo = "";
+            await Task.Run(() =>
+            {
+                using var image = new Ufs2Image(ImagePath, readOnly: true);
+                statInfo = image.GetStat(FsPath);
+            });
+            SuperblockInfo = statInfo;
+            _outputLog.Add("[Stat] File information retrieved successfully.");
+            _outputLog.Add(statInfo);
+        }
+        catch (Exception ex)
+        {
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
+        }
+        finally { IsRunning = false; }
+    }
+
+    [RelayCommand]
+    private async Task FindAsync()
+    {
+        if (!ValidateImagePath()) return;
+        if (string.IsNullOrWhiteSpace(FindPattern))
+        {
+            _outputLog.Add("[Error] Please specify a search pattern (e.g., *.txt).");
+            return;
+        }
+        IsRunning = true;
+        string startPath = string.IsNullOrWhiteSpace(FsPath) ? "/" : FsPath;
+        string? typeFilter = string.IsNullOrWhiteSpace(FindTypeFilter) ? null : FindTypeFilter;
+        _outputLog.Add($"[Find] Searching for '{FindPattern}' in '{startPath}'{(typeFilter != null ? $" (type={typeFilter})" : "")}...");
+        try
+        {
+            string report = "";
+            await Task.Run(() =>
+            {
+                using var image = new Ufs2Image(ImagePath, readOnly: true);
+                var results = image.Find(FindPattern, startPath, typeFilter);
+
+                var sb = new System.Text.StringBuilder();
+                if (results.Count == 0)
+                {
+                    sb.AppendLine("No matches found.");
+                }
+                else
+                {
+                    foreach (var result in results)
+                    {
+                        string typeStr = result.FileType switch
+                        {
+                            Ufs2Constants.DtDir => "DIR ",
+                            Ufs2Constants.DtReg => "FILE",
+                            Ufs2Constants.DtLnk => "LINK",
+                            _ => "??? "
+                        };
+                        sb.AppendLine($"  {typeStr}  {result.Size,10}  {result.Path}");
+                    }
+                    sb.AppendLine($"\n{results.Count} match(es) found.");
+                }
+                report = sb.ToString();
+            });
+            SuperblockInfo = report;
+            _outputLog.Add("[Find] Search completed.");
+            _outputLog.Add(report);
+        }
+        catch (Exception ex)
+        {
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
+        }
+        finally { IsRunning = false; }
+    }
+
+    [RelayCommand]
+    private async Task DiskUsageAsync()
+    {
+        if (!ValidateImagePath()) return;
+        IsRunning = true;
+        string targetPath = string.IsNullOrWhiteSpace(FsPath) ? "/" : FsPath;
+        _outputLog.Add($"[DU] Calculating disk usage for '{targetPath}' in '{ImagePath}'...");
+        try
+        {
+            string report = "";
+            await Task.Run(() =>
+            {
+                using var image = new Ufs2Image(ImagePath, readOnly: true);
+                var entries = image.DiskUsage(targetPath);
+
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine($"Disk usage for '{targetPath}':");
+                sb.AppendLine();
+                foreach (var entry in entries)
+                {
+                    string size = FormatHumanReadableSize(entry.Blocks * 512);
+                    sb.AppendLine($"  {size,10}\t{entry.Path}");
+                }
+                report = sb.ToString();
+            });
+            SuperblockInfo = report;
+            _outputLog.Add("[DU] Disk usage calculated successfully.");
+            _outputLog.Add(report);
+        }
+        catch (Exception ex)
+        {
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
+        }
+        finally { IsRunning = false; }
+    }
+
+    /// <summary>
+    /// Format a byte count as a human-readable string (e.g., "1.5 KB", "234 MB").
+    /// </summary>
+    private static string FormatHumanReadableSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        double value = bytes;
+        string[] units = ["KB", "MB", "GB", "TB"];
+        int unitIndex = -1;
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+        return $"{value:F1} {units[unitIndex]}";
     }
 
     private bool ValidateImagePath()

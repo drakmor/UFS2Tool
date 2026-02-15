@@ -189,6 +189,9 @@ namespace UFS2Tool
             if (_readOnly)
                 return DokanResult.AccessDenied;
 
+            if (offset < 0)
+                return DokanResult.InvalidParameter;
+
             var inode = TryResolvePath(fileName);
             if (inode == null)
                 return DokanResult.FileNotFound;
@@ -204,7 +207,9 @@ namespace UFS2Tool
                     // Read existing file data, apply the write, then replace
                     byte[] existingData = _image.ReadFile(inode.Value);
                     long newSize = Math.Max(existingData.Length, offset + buffer.Length);
-                    byte[] newData = new byte[newSize];
+                    if (newSize > int.MaxValue)
+                        return DokanResult.InvalidParameter;
+                    byte[] newData = new byte[(int)newSize];
                     Array.Copy(existingData, 0, newData, 0, existingData.Length);
                     Array.Copy(buffer, 0, newData, offset, buffer.Length);
 
@@ -527,6 +532,9 @@ namespace UFS2Tool
             if (_readOnly)
                 return DokanResult.AccessDenied;
 
+            if (length < 0 || length > int.MaxValue)
+                return DokanResult.InvalidParameter;
+
             var inode = TryResolvePath(fileName);
             if (inode == null)
                 return DokanResult.FileNotFound;
@@ -537,8 +545,8 @@ namespace UFS2Tool
                 {
                     string ufsPath = NormalizePath(fileName);
                     byte[] existingData = _image.ReadFile(inode.Value);
-                    byte[] newData = new byte[length];
-                    Array.Copy(existingData, 0, newData, 0, Math.Min(existingData.Length, length));
+                    byte[] newData = new byte[(int)length];
+                    Array.Copy(existingData, 0, newData, 0, Math.Min(existingData.Length, (int)length));
                     _image.ReplaceFileContent(ufsPath, newData);
                 }
                 return DokanResult.Success;
@@ -577,11 +585,12 @@ namespace UFS2Tool
             var sb = _image.Superblock;
 
             long totalFrags = sb.TotalBlocks;
-            long freeFrags = sb.FreeBlocks;
             int fragSize = sb.FSize;
 
             totalNumberOfBytes = totalFrags * fragSize;
-            totalNumberOfFreeBytes = freeFrags * fragSize;
+            // FreeBlocks is the count of free full blocks (cs_nbfree),
+            // FreeFragments is the count of free individual fragments (cs_nffree).
+            totalNumberOfFreeBytes = sb.FreeBlocks * sb.BSize + sb.FreeFragments * fragSize;
             freeBytesAvailable = _readOnly ? 0 : totalNumberOfFreeBytes;
 
             return DokanResult.Success;

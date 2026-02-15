@@ -96,6 +96,12 @@ public partial class CreateFilesystemViewModel : ViewModelBase
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(InputDirectory) && SizeInMB <= 0)
+        {
+            _outputLog.Add("[Error] Image size must be greater than 0 MB.");
+            return;
+        }
+
         IsRunning = true;
         _outputLog.Add($"[NewFS] Creating UFS{FilesystemFormat} filesystem: {ImagePath}");
         _outputLog.Add($"[NewFS] Parameters: BlockSize={BlockSize}, FragSize={FragmentSize}, SectorSize={SectorSize}");

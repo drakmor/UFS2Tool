@@ -8,7 +8,7 @@
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-0078D6.svg)](#)
 
-A complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `growfs(8)`, `fsck_ufs(8)`, and `chmod` commands for creating, managing, and checking UFS1 and UFS2 filesystems, targeting both image files and raw disk devices (Windows). Image file operations work on any platform supported by .NET 8.0.
+A complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `growfs(8)`, `fsck_ufs(8)`, `du(1)`, and `chmod` commands for creating, managing, and checking UFS1 and UFS2 filesystems, targeting both image files and raw disk devices (Windows). Image file operations work on any platform supported by .NET 8.0.
 
 </div>
 
@@ -31,6 +31,9 @@ A complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `gr
   - [delete](#delete--delete-files-from-filesystem)
   - [rename](#rename--rename-files-or-directories)
   - [chmod](#chmod--change-file-permissions)
+  - [stat](#stat--show-detailed-file-information)
+  - [find](#find--search-for-files-by-name-pattern)
+  - [du](#du--show-disk-usage)
   - [mount_udf](#mount_udf--mount-ufs-image-as-windows-drive)
   - [umount_udf](#umount_udf--unmount-a-ufs-drive)
   - [devinfo](#devinfo--show-device-information)
@@ -59,6 +62,8 @@ A complete implementation of FreeBSD's `newfs(8)`, `makefs(8)`, `tunefs(8)`, `gr
 - **Add files** to existing UFS1/UFS2 filesystem images (single file or directory tree, recursive)
 - **Delete files** from existing UFS1/UFS2 filesystem images (single file or directory tree, recursive)
 - **Rename files** or directories inside UFS1/UFS2 filesystem images
+- **Search for files** by name pattern with glob wildcards (`*`, `?`) and type filtering
+- **Disk usage analysis** similar to FreeBSD `du(1)` with human-readable sizes, depth limiting, and summary mode
 - **Mount UFS images** as Windows drives with read-write support via Dokan
 - **Read and inspect** existing UFS1/UFS2 filesystem images
 - **List directory contents** from UFS1/UFS2 images
@@ -387,6 +392,86 @@ ufs2tool chmod -R myimage.img 644
 ufs2tool chmod -R myimage.img 644 755
 ```
 
+### `stat` — Show detailed file information
+
+```
+ufs2tool stat <image-path> <fs-path>
+```
+
+Displays detailed inode information for a file, directory, or symbolic link inside a UFS1/UFS2 filesystem image. Output includes file type, inode number, permissions (octal and symbolic), link count, owner UID/GID, size, block count, timestamps (access, modify, change, birth), and block pointer usage.
+
+**Examples:**
+```bash
+# Show info for root directory
+ufs2tool stat myimage.img /
+
+# Show info for a specific file
+ufs2tool stat myimage.img /path/to/file.txt
+
+# Show info for a subdirectory
+ufs2tool stat myimage.img /path/to/dir
+```
+
+### `find` — Search for files by name pattern
+
+```
+ufs2tool find <image-path> <name-pattern> [-type f|d|l] [-path start-path]
+```
+
+Recursively search for files and directories matching a name pattern within a UFS1/UFS2 filesystem image. Supports glob-style wildcards (`*` and `?`) and optional type filtering.
+
+| Option | Description |
+|--------|-------------|
+| `-type f` | Match regular files only |
+| `-type d` | Match directories only |
+| `-type l` | Match symbolic links only |
+| `-path start-path` | Start searching from the specified directory (default: `/`) |
+
+```bash
+# Find all .txt files
+ufs2tool find myimage.img "*.txt"
+
+# Find files matching a prefix
+ufs2tool find myimage.img "game*" -type f
+
+# Find all directories
+ufs2tool find myimage.img "*" -type d
+
+# Find files in a specific subdirectory
+ufs2tool find myimage.img "*.cfg" -path /etc
+```
+
+### `du` — Show disk usage
+
+```
+ufs2tool du [-h] [-s] [-d depth] <image-path> [fs-path]
+```
+
+Display disk usage for files and directories in a UFS1/UFS2 filesystem image, similar to FreeBSD's `du(1)`.
+
+| Option | Description |
+|--------|-------------|
+| `-h` | Human-readable sizes (e.g., 1K, 234M, 2G) |
+| `-s` | Summary only (total for the specified path) |
+| `-d depth` | Maximum directory depth to report |
+
+```bash
+# Show disk usage for the entire filesystem
+ufs2tool du myimage.img
+
+# Show disk usage with human-readable sizes
+ufs2tool du -h myimage.img
+
+# Show summary only
+ufs2tool du -s myimage.img
+
+# Show disk usage for a specific directory
+ufs2tool du myimage.img /subdir
+
+# Limit depth
+ufs2tool du -d 1 myimage.img
+```
+
 ### `mount_udf` — Mount UFS image as Windows drive
 
 ```
@@ -530,6 +615,8 @@ Alternatively, you can use this command to quickly create a UFS2 image with Free
 UFS2Tool.exe makefs -S 4096 -t ffs -o version=2,minfree=0,softupdates=0,optimization=space <PPSAxxxx.ffpkg> <folder>
 ```
 
+The GUI's **PS5** tab also supports **batch processing** — add multiple input folders and generate all `.ffpkg` images in one operation. Output filenames are automatically derived from folder names, with collision detection to prevent overwrites when multiple folders share the same name.
+
 ---
 
 ## 🖥️ GUI Application
@@ -538,10 +625,12 @@ The project includes a modern cross-platform GUI built with [Avalonia UI](https:
 
 - **Create Filesystem** — Create UFS1/UFS2 images with configurable parameters
 - **Filesystem Operations** — List, extract, add, delete, replace files, and change permissions
+- **Content Browser** — Browse filesystem contents visually with tree navigation
 - **Maintenance** — TuneFS, GrowFS, and FsckUFS operations
+- **Write Filesystem** — Write UFS images to USB drives and physical devices with progress tracking and optional post-write verification (Windows, Linux, macOS)
 - **Device Mount** — Mount/unmount UFS images as Windows drives (Windows only, requires Dokan)
-- **PS5 Quick Create** — Preset templates for PS5-compatible filesystem creation
-- **Settings** — Language selection (supports 21 languages)
+- **PS5 Quick Create** — Preset templates for PS5-compatible filesystem creation with single-folder and batch processing modes
+- **Settings** — Language selection with automatic detection from OS locale (supports 26 languages)
 
 **Building the GUI:**
 
@@ -602,10 +691,14 @@ dotnet test
 | `ExtractTests` | Tests file extraction from UFS1/UFS2 filesystem images |
 | `ReplaceTests` | Tests file and directory replacement in UFS1/UFS2 filesystem images |
 | `AddDeleteTests` | Tests adding and deleting files and directories in UFS1/UFS2 filesystem images |
+| `RenameTests` | Tests renaming files and directories in UFS1/UFS2 filesystem images |
 | `TuneFsTests` | Tests tunefs command and filesystem tuning |
 | `GrowFsTests` | Tests growfs command and filesystem expansion |
 | `FsckUfsTests` | Tests fsck_ufs command and filesystem consistency checking |
 | `ChmodTests` | Tests chmod functionality: permission changes, recursive operations, and file type bit preservation |
+| `FindTests` | Tests find functionality: pattern matching, type filtering, subdirectory searching, and UFS1/UFS2 support |
+| `DuTests` | Tests du functionality: disk usage calculation, depth limiting, summary mode, and UFS1/UFS2 support |
+| `ProgressOutputTests` | Tests progress output formatting during file addition operations |
 
 ---
 

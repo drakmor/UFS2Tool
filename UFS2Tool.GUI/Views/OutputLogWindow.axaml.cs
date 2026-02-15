@@ -22,12 +22,16 @@ public partial class OutputLogWindow : Window
         {
             vm.OutputLog.CollectionChanged += OnOutputLogChanged;
             Closed += (_, _) => vm.OutputLog.CollectionChanged -= OnOutputLogChanged;
+
+            // Scroll to the latest entry when the window opens
+            if (LogList.ItemCount > 0)
+                LogList.ScrollIntoView(LogList.ItemCount - 1);
         }
     }
 
     private void OnOutputLogChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (e.Action == NotifyCollectionChangedAction.Add)
+        if (e.Action is NotifyCollectionChangedAction.Add or NotifyCollectionChangedAction.Replace)
         {
             var list = LogList;
             if (list.ItemCount > 0)

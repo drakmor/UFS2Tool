@@ -38,7 +38,7 @@ public partial class MainWindow : Window
 
     private void OnOutputLogChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (e.Action == NotifyCollectionChangedAction.Add)
+        if (e.Action is NotifyCollectionChangedAction.Add or NotifyCollectionChangedAction.Replace)
         {
             // Auto-scroll to the last item
             var list = OutputLogList;

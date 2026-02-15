@@ -7,13 +7,13 @@
         xmlns:views="using:UFS2Tool.GUI.Views"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="1150" d:DesignHeight="750"
+        mc:Ignorable="d" d:DesignWidth="1560" d:DesignHeight="900"
         x:Class="UFS2Tool.GUI.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Icon="/Assets/avalonia-logo.ico"
         Title="UFS2 Tool — Filesystem Manager"
-        Width="1150" Height="750"
-        MinWidth="1150" MinHeight="750">
+        Width="1560" Height="900"
+        MinWidth="1280" MinHeight="800">
 
     <Design.DataContext>
         <vm:MainWindowViewModel/>
@@ -59,7 +59,9 @@
 
         <!-- Tab Control (Center) -->
         <TabControl Margin="8" SelectedIndex="{Binding SelectedTabIndex}">
-            <TabItem FontSize="20">
+
+            <!-- Creation & Output -->
+            <TabItem FontSize="18">
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Text="💾" FontSize="20" VerticalAlignment="Center"/>
@@ -68,7 +70,18 @@
                 </TabItem.Header>
                 <ContentControl Content="{Binding CreateFilesystemTab}"/>
             </TabItem>
-            <TabItem FontSize="20">
+            <TabItem FontSize="18">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="✏️" FontSize="20" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc[TabWriteFilesystem]}" FontSize="20" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding WriteFilesystemTab}"/>
+            </TabItem>
+
+            <!-- Browsing & Operations -->
+            <TabItem FontSize="18">
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Text="📂" FontSize="20" VerticalAlignment="Center"/>
@@ -77,7 +90,18 @@
                 </TabItem.Header>
                 <ContentControl Content="{Binding FilesystemOperationsTab}"/>
             </TabItem>
-            <TabItem FontSize="20">
+            <TabItem FontSize="18">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="🌳" FontSize="20" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc[TabContentBrowser]}" FontSize="20" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding ContentBrowserTab}"/>
+            </TabItem>
+
+            <!-- Maintenance & Devices -->
+            <TabItem FontSize="18">
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Text="🔧" FontSize="20" VerticalAlignment="Center"/>
@@ -86,7 +110,7 @@
                 </TabItem.Header>
                 <ContentControl Content="{Binding MaintenanceTab}"/>
             </TabItem>
-            <TabItem FontSize="20">
+            <TabItem FontSize="18">
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Text="💿" FontSize="20" VerticalAlignment="Center"/>
@@ -95,7 +119,9 @@
                 </TabItem.Header>
                 <ContentControl Content="{Binding DeviceMountTab}"/>
             </TabItem>
-            <TabItem FontSize="20">
+
+            <!-- Specialized -->
+            <TabItem FontSize="18">
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Text="🎮" FontSize="20" VerticalAlignment="Center"/>
@@ -104,7 +130,7 @@
                 </TabItem.Header>
                 <ContentControl Content="{Binding PS5QuickCreateTab}"/>
             </TabItem>
-            <TabItem FontSize="20">
+            <TabItem FontSize="18">
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Text="⚙️" FontSize="20" VerticalAlignment="Center"/>
@@ -113,6 +139,7 @@
                 </TabItem.Header>
                 <ContentControl Content="{Binding SettingsTab}"/>
             </TabItem>
+
         </TabControl>
     </DockPanel>
 </Window>

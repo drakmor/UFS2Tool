@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <Version>3.0.0</Version>
+    <Version>4.0.0</Version>
     <Authors>SvenGDK</Authors>
     <Description>UFS2 Tool GUI — Modern GUI for FreeBSD UFS1/UFS2 Filesystem Manager</Description>
     <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>

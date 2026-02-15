@@ -70,7 +70,7 @@ public partial class DeviceMountViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            _outputLog.Add($"[Error] {ex.Message}");
+            _outputLog.Add($"[Error] {ex.Message}{(ex.InnerException != null ? $" — {ex.InnerException.Message}" : "")}");
         }
         finally { IsRunning = false; }
     }

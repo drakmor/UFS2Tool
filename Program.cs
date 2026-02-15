@@ -38,6 +38,9 @@ namespace Ufs2Tool
                     "delete" => HandleDelete(args),
                     "rename" => HandleRename(args),
                     "chmod" => HandleChmod(args),
+                    "stat" => HandleStat(args),
+                    "find" => HandleFind(args),
+                    "du" => HandleDu(args),
                     "devinfo" => HandleDevInfo(args),
                     "mount_udf" => HandleMountUdf(args),
                     "umount_udf" => HandleUmountUdf(args),
@@ -684,6 +687,8 @@ namespace Ufs2Tool
 
             // Handle product notation (e.g., "512x1024")
             string[] factors = input.Split('x', StringSplitOptions.RemoveEmptyEntries);
+            if (factors.Length == 0)
+                return false;
             long product = 1;
 
             foreach (string factor in factors)
@@ -1420,12 +1425,12 @@ namespace Ufs2Tool
                 if (oflag)
                 {
                     string name = "optimization preference";
-                    string[] chg = ["time", "space"];
+                    string OptName(int v) => v == Ufs2Constants.FsOptTime ? "time" : v == Ufs2Constants.FsOptSpace ? "space" : $"unknown({v})";
                     if (sb.Optimization == ovalue)
-                        Console.Error.WriteLine($"{name} remains unchanged as {chg[ovalue]}");
+                        Console.Error.WriteLine($"{name} remains unchanged as {OptName(ovalue)}");
                     else
                     {
-                        Console.Error.WriteLine($"{name} changes from {chg[sb.Optimization]} to {chg[ovalue]}");
+                        Console.Error.WriteLine($"{name} changes from {OptName(sb.Optimization)} to {OptName(ovalue)}");
                         sb.Optimization = ovalue;
                         if (sb.MinFreePercent >= 8 && ovalue == Ufs2Constants.FsOptSpace)
                             Console.Error.WriteLine("should optimize for time with minfree >= 8%");
@@ -1615,6 +1620,8 @@ namespace Ufs2Tool
 
             // Handle product notation (e.g., "512x1024")
             string[] factors = input.Split('x', StringSplitOptions.RemoveEmptyEntries);
+            if (factors.Length == 0)
+                return false;
             long product = 1;
 
             foreach (string factor in factors)
@@ -1749,17 +1756,29 @@ namespace Ufs2Tool
                             bool allValid = true;
                             for (int c = 1; c < args[i].Length; c++)
                             {
-                                switch (args[i][c])
+                                if (args[i][c] != 'p' && args[i][c] != 'n' &&
+                                    args[i][c] != 'y' && args[i][c] != 'f' &&
+                                    args[i][c] != 'd')
                                 {
-                                    case 'p': pflag = true; break;
-                                    case 'n': nflag = true; break;
-                                    case 'y': yflag = true; break;
-                                    case 'f': fflag = true; break;
-                                    case 'd': dflag = true; break;
-                                    default: allValid = false; break;
+                                    allValid = false;
+                                    break;
                                 }
                             }
-                            if (!allValid)
+                            if (allValid)
+                            {
+                                for (int c = 1; c < args[i].Length; c++)
+                                {
+                                    switch (args[i][c])
+                                    {
+                                        case 'p': pflag = true; break;
+                                        case 'n': nflag = true; break;
+                                        case 'y': yflag = true; break;
+                                        case 'f': fflag = true; break;
+                                        case 'd': dflag = true; break;
+                                    }
+                                }
+                            }
+                            else
                             {
                                 positional.Add(args[i]);
                             }
@@ -1797,7 +1816,7 @@ namespace Ufs2Tool
             bool isClean = (sb.Flags & Ufs2Constants.FsUnclean) == 0 &&
                            (sb.Flags & Ufs2Constants.FsNeedsfsck) == 0;
 
-            if (isClean && !fflag && (pflag || !yflag && !nflag))
+            if (isClean && !fflag && (pflag || (!yflag && !nflag)))
             {
                 Console.WriteLine($"** {target} is clean");
                 return 0;
@@ -1868,9 +1887,11 @@ namespace Ufs2Tool
             }
 
             using var image = new Ufs2Image(args[1], readOnly: true);
-            var entries = image.ListRoot();
+            string fsPath = args.Length > 2 ? args[2] : "/";
+            uint dirInode = image.ResolvePath(fsPath);
+            var entries = image.ListDirectory(dirInode);
 
-            Console.WriteLine($"Root directory ({entries.Count} entries):");
+            Console.WriteLine($"Directory '{fsPath}' ({entries.Count} entries):");
             foreach (var entry in entries)
             {
                 string typeStr = entry.FileType switch
@@ -1883,6 +1904,238 @@ namespace Ufs2Tool
                 Console.WriteLine($"  {typeStr}  inode={entry.Inode,6}  {entry.Name}");
             }
             return 0;
+        }
+
+        /// <summary>
+        /// Display detailed file/directory/symlink information from a UFS1/UFS2 filesystem image.
+        ///
+        /// Synopsis:
+        ///   stat <image-path> <fs-path>
+        /// </summary>
+        static int HandleStat(string[] args)
+        {
+            if (args.Length < 3)
+            {
+                Console.Error.WriteLine("Usage: ufs2tool stat <image-path> <fs-path>");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("  Show detailed file information:");
+                Console.Error.WriteLine("    ufs2tool stat myimage.img /path/to/file.txt");
+                Console.Error.WriteLine("    ufs2tool stat myimage.img /path/to/dir");
+                Console.Error.WriteLine("    ufs2tool stat myimage.img /");
+                return 1;
+            }
+
+            using var image = new Ufs2Image(args[1], readOnly: true);
+            Console.WriteLine(image.GetStat(args[2]));
+            return 0;
+        }
+
+        /// <summary>
+        /// Search for files matching a name pattern in a UFS1/UFS2 filesystem image.
+        ///
+        /// Synopsis:
+        ///   find <image-path> <name-pattern> [-type f|d|l] [-path start-path]
+        ///
+        /// Recursively searches the filesystem for entries whose name matches
+        /// the given glob pattern (supporting * and ? wildcards).
+        /// </summary>
+        static int HandleFind(string[] args)
+        {
+            if (args.Length < 3)
+            {
+                Console.Error.WriteLine("Usage: ufs2tool find <image-path> <name-pattern> [-type f|d|l] [-path start-path]");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("  Search for files by name pattern:");
+                Console.Error.WriteLine("    ufs2tool find myimage.img \"*.txt\"");
+                Console.Error.WriteLine("    ufs2tool find myimage.img \"game*\" -type f");
+                Console.Error.WriteLine("    ufs2tool find myimage.img \"*\" -type d");
+                Console.Error.WriteLine("    ufs2tool find myimage.img \"*.cfg\" -path /etc");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("  Pattern wildcards:");
+                Console.Error.WriteLine("    *    matches any sequence of characters");
+                Console.Error.WriteLine("    ?    matches any single character");
+                return 1;
+            }
+
+            string imagePath = args[1];
+            string namePattern = args[2];
+            string? typeFilter = null;
+            string startPath = "/";
+
+            // Parse optional flags
+            int i = 3;
+            while (i < args.Length)
+            {
+                switch (args[i])
+                {
+                    case "-type":
+                        if (i + 1 >= args.Length)
+                        {
+                            Console.Error.WriteLine("Error: -type requires a value (f, d, or l).");
+                            return 1;
+                        }
+                        typeFilter = args[++i];
+                        if (typeFilter != "f" && typeFilter != "d" && typeFilter != "l")
+                        {
+                            Console.Error.WriteLine($"Error: Invalid type filter '{typeFilter}'. Use 'f' (file), 'd' (directory), or 'l' (symlink).");
+                            return 1;
+                        }
+                        break;
+
+                    case "-path":
+                        if (i + 1 >= args.Length)
+                        {
+                            Console.Error.WriteLine("Error: -path requires a value.");
+                            return 1;
+                        }
+                        startPath = args[++i];
+                        break;
+
+                    default:
+                        Console.Error.WriteLine($"Error: Unknown option '{args[i]}'.");
+                        return 1;
+                }
+                i++;
+            }
+
+            using var image = new Ufs2Image(imagePath, readOnly: true);
+            var results = image.Find(namePattern, startPath, typeFilter);
+
+            if (results.Count == 0)
+            {
+                Console.WriteLine("No matches found.");
+                return 0;
+            }
+
+            foreach (var result in results)
+            {
+                string typeStr = result.FileType switch
+                {
+                    Ufs2Constants.DtDir => "DIR ",
+                    Ufs2Constants.DtReg => "FILE",
+                    Ufs2Constants.DtLnk => "LINK",
+                    _ => "??? "
+                };
+                Console.WriteLine($"  {typeStr}  {result.Size,10}  {result.Path}");
+            }
+
+            Console.WriteLine($"\n{results.Count} match(es) found.");
+            return 0;
+        }
+
+        /// <summary>
+        /// Display disk usage for files and directories in a UFS1/UFS2 filesystem image,
+        /// similar to FreeBSD du(1).
+        ///
+        /// Synopsis:
+        ///   du [-h] [-s] [-d depth] <image-path> [fs-path]
+        ///
+        /// Options:
+        ///   -h           Human-readable sizes (e.g., 1K, 234M, 2G)
+        ///   -s           Summary only (total for the specified path)
+        ///   -d depth     Maximum directory depth to report
+        /// </summary>
+        static int HandleDu(string[] args)
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: ufs2tool du [-h] [-s] [-d depth] <image-path> [fs-path]");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("  Show disk usage for the entire filesystem:");
+                Console.Error.WriteLine("    ufs2tool du myimage.img");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("  Show disk usage with human-readable sizes:");
+                Console.Error.WriteLine("    ufs2tool du -h myimage.img");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("  Show summary only:");
+                Console.Error.WriteLine("    ufs2tool du -s myimage.img");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("  Show disk usage for a specific directory:");
+                Console.Error.WriteLine("    ufs2tool du myimage.img /subdir");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("  Limit depth:");
+                Console.Error.WriteLine("    ufs2tool du -d 1 myimage.img");
+                Console.Error.WriteLine();
+                Console.Error.WriteLine("Options:");
+                Console.Error.WriteLine("  -h           Human-readable sizes (e.g., 1K, 234M, 2G)");
+                Console.Error.WriteLine("  -s           Summary only (total for specified path)");
+                Console.Error.WriteLine("  -d depth     Maximum directory depth to report");
+                return 1;
+            }
+
+            bool humanReadable = false;
+            bool summaryOnly = false;
+            int maxDepth = -1;
+            var positional = new List<string>();
+
+            int i = 1;
+            while (i < args.Length)
+            {
+                switch (args[i])
+                {
+                    case "-h":
+                        humanReadable = true;
+                        break;
+                    case "-s":
+                        summaryOnly = true;
+                        break;
+                    case "-d":
+                        if (i + 1 >= args.Length)
+                        {
+                            Console.Error.WriteLine("Error: -d requires a depth value.");
+                            return 1;
+                        }
+                        if (!int.TryParse(args[++i], out maxDepth) || maxDepth < 0)
+                        {
+                            Console.Error.WriteLine($"Error: Invalid depth value '{args[i]}'.");
+                            return 1;
+                        }
+                        break;
+                    default:
+                        positional.Add(args[i]);
+                        break;
+                }
+                i++;
+            }
+
+            if (positional.Count < 1)
+            {
+                Console.Error.WriteLine("Error: Image path is required.");
+                return 1;
+            }
+
+            string imagePath = positional[0];
+            string fsPath = positional.Count > 1 ? positional[1] : "/";
+
+            using var image = new Ufs2Image(imagePath, readOnly: true);
+            var entries = image.DiskUsage(fsPath, maxDepth, summaryOnly);
+
+            foreach (var entry in entries)
+            {
+                string sizeStr = humanReadable
+                    ? FormatHumanReadable(entry.Blocks * 512)
+                    : entry.Blocks.ToString();
+                Console.WriteLine($"{sizeStr,10}\t{entry.Path}");
+            }
+
+            return 0;
+        }
+
+        /// <summary>
+        /// Format a byte count as a human-readable string (e.g., "1.5K", "234M", "2.1G").
+        /// </summary>
+        private static string FormatHumanReadable(long bytes)
+        {
+            if (bytes < 1024) return $"{bytes}B";
+            double value = bytes;
+            string[] units = ["K", "M", "G", "T"];
+            int unitIndex = -1;
+            while (value >= 1024 && unitIndex < units.Length - 1)
+            {
+                value /= 1024;
+                unitIndex++;
+            }
+            return value >= 10 ? $"{value:F0}{units[unitIndex]}" : $"{value:F1}{units[unitIndex]}";
         }
 
         /// <summary>
@@ -2734,6 +2987,17 @@ namespace Ufs2Tool
                   chmod   [-R] <image-path> <mode> [fs-path]
                           Change permissions of a file or directory in a UFS image.
                           With -R, apply to entire image (files and directories).
+                  stat    <image-path> <fs-path>
+                          Show detailed file, directory, or symlink information.
+                  find    <image-path> <name-pattern> [-type f|d|l] [-path start-path]
+                          Search for files by name pattern. Supports * and ? wildcards.
+                          -type f (files), d (directories), l (symlinks).
+                          -path to start search from a subdirectory.
+                  du      [-h] [-s] [-d depth] <image-path> [fs-path]
+                          Display disk usage statistics for files and directories.
+                          -h for human-readable sizes, -s for summary only,
+                          -d to limit directory depth.
+                          (Modeled after FreeBSD du(1))
                   devinfo <device-path>
                           Show device size and sector information
                   mount_udf [-o options] [-v] <image-path> <drive-letter>
@@ -2781,6 +3045,15 @@ namespace Ufs2Tool
                   ufs2tool chmod myimage.img 755 /path/to/dir
                   ufs2tool chmod -R myimage.img 644
                   ufs2tool chmod -R myimage.img 644 755
+                  ufs2tool stat myimage.img /path/to/file.txt
+                  ufs2tool stat myimage.img /
+                  ufs2tool find myimage.img "*.txt"
+                  ufs2tool find myimage.img "game*" -type f
+                  ufs2tool find myimage.img "*" -type d -path /subdir
+                  ufs2tool du myimage.img
+                  ufs2tool du -h myimage.img /subdir
+                  ufs2tool du -s myimage.img
+                  ufs2tool du -d 1 myimage.img
                   ufs2tool devinfo \\.\PhysicalDrive2
                   ufs2tool mount_udf myimage.img X:
                   ufs2tool mount_udf -v myimage.img Z:

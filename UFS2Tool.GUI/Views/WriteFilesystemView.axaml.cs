@@ -8,14 +8,14 @@ using UFS2Tool.GUI.ViewModels;
 
 namespace UFS2Tool.GUI.Views;
 
-public partial class FilesystemOperationsView : UserControl
+public partial class WriteFilesystemView : UserControl
 {
-    public FilesystemOperationsView()
+    public WriteFilesystemView()
     {
         InitializeComponent();
     }
 
-    private async void BrowseImagePath_Click(object? sender, RoutedEventArgs e)
+    private async void BrowseSourceImage_Click(object? sender, RoutedEventArgs e)
     {
         var topLevel = TopLevel.GetTopLevel(this);
         if (topLevel == null) return;
@@ -30,9 +30,9 @@ public partial class FilesystemOperationsView : UserControl
             },
         });
 
-        if (files.Count > 0 && DataContext is FilesystemOperationsViewModel vm)
+        if (files.Count > 0 && DataContext is WriteFilesystemViewModel vm)
         {
-            vm.ImagePath = files[0].Path.LocalPath;
+            vm.SourceImagePath = files[0].Path.LocalPath;
         }
     }
 }

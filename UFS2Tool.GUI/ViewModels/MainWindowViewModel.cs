@@ -18,7 +18,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public CreateFilesystemViewModel CreateFilesystemTab { get; }
     public FilesystemOperationsViewModel FilesystemOperationsTab { get; }
+    public ContentBrowserViewModel ContentBrowserTab { get; }
     public MaintenanceViewModel MaintenanceTab { get; }
+    public WriteFilesystemViewModel WriteFilesystemTab { get; }
     public DeviceMountViewModel DeviceMountTab { get; }
     public PS5QuickCreateViewModel PS5QuickCreateTab { get; }
     public SettingsViewModel SettingsTab { get; }
@@ -27,7 +29,9 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         CreateFilesystemTab = new CreateFilesystemViewModel(OutputLog);
         FilesystemOperationsTab = new FilesystemOperationsViewModel(OutputLog);
+        ContentBrowserTab = new ContentBrowserViewModel(OutputLog);
         MaintenanceTab = new MaintenanceViewModel(OutputLog);
+        WriteFilesystemTab = new WriteFilesystemViewModel(OutputLog);
         DeviceMountTab = new DeviceMountViewModel(OutputLog);
         PS5QuickCreateTab = new PS5QuickCreateViewModel(OutputLog);
         SettingsTab = new SettingsViewModel();

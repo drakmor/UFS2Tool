@@ -1159,7 +1159,7 @@ namespace UFS2Tool
                 Gid = 0,
                 BlkSize = (uint)BlockSize,
                 Size = BlockSize,
-                Blocks = BlockSize / SectorSize,
+                Blocks = BlockSize / Ufs2Constants.DefaultSectorSize,
                 AccessTime = timestamp,
                 ModTime = timestamp,
                 ChangeTime = timestamp,
@@ -1180,7 +1180,7 @@ namespace UFS2Tool
                 Uid = 0,
                 Gid = 0,
                 Size = BlockSize,
-                Blocks = BlockSize / SectorSize,
+                Blocks = BlockSize / Ufs2Constants.DefaultSectorSize,
                 AccessTime = time32,
                 ModTime = time32,
                 ChangeTime = time32,
@@ -2044,7 +2044,7 @@ namespace UFS2Tool
             HashSet<long>? tailFreeFrags = null, uint parentDirDepth = 0,
             Action<int, long>? onCopyProgress = null)
         {
-            uint maxInodes = (uint)(sb.NumCylGroups * sb.InodesPerGroup);
+            uint maxInodes = (uint)((long)sb.NumCylGroups * sb.InodesPerGroup);
 
             foreach (var entry in new DirectoryInfo(dirPath).EnumerateFileSystemInfos("*", SearchOption.TopDirectoryOnly))
             {
@@ -3032,7 +3032,7 @@ namespace UFS2Tool
                 }
                 else
                 {
-                    int firstInodeInCg = cg * sb.InodesPerGroup;
+                    long firstInodeInCg = (long)cg * sb.InodesPerGroup;
                     if (nextInode > firstInodeInCg)
                         inodesUsedInCg = (int)Math.Min(nextInode - firstInodeInCg, (uint)sb.InodesPerGroup);
                     else
