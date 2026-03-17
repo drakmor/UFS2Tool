@@ -2,7 +2,7 @@
 
 # 🗄️ UFS2Tool
 
-**FreeBSD UFS1/UFS2 Filesystem Manager**
+**FreeBSD UFS1/UFS2 Filesystem Manager for Windows, macOS & Linux.**
 
 [![License: BSD-2-Clause](https://img.shields.io/badge/License-BSD_2--Clause-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
