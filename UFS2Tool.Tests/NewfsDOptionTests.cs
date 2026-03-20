@@ -212,6 +212,24 @@ namespace UFS2Tool.Tests
         }
 
         [Fact]
+        public void DOption_DefaultNewfsRootContainsSnapDirectory()
+        {
+            File.WriteAllText(Path.Combine(_testDir, "test.txt"), "hello");
+            var creator = new Ufs2ImageCreator();
+
+            var (_, diskSize, _) = Ufs2ImageCreator.CalculateDirectorySizes(_testDir, creator.BlockSize);
+            long imageSize = creator.CalculateImageSize(diskSize);
+            creator.CreateImage(_imagePath, imageSize);
+
+            using var image = new Ufs2Image(_imagePath, readOnly: true);
+            var entries = image.ListRoot();
+
+            var snap = entries.First(e => e.Name == ".snap");
+            Assert.Equal(Ufs2Constants.DtDir, snap.FileType);
+            Assert.Equal((uint)(Ufs2Constants.RootInode + 1), snap.Inode);
+        }
+
+        [Fact]
         public void DOption_SuperblockCountsAreConsistent()
         {
             File.WriteAllText(Path.Combine(_testDir, "test.txt"), "hello");
@@ -884,13 +902,13 @@ namespace UFS2Tool.Tests
         }
 
         // -----------------------------------------------------------------------
-        // FreeBSD makefs(8) compliance: Soft updates behavior
+        // FreeBSD newfs -D compliance: Soft updates behavior
         // -----------------------------------------------------------------------
 
         [Fact]
-        public void CreateImageFromDirectory_DisablesSoftUpdates_ByDefault()
+        public void CreateImageFromDirectory_EnablesSoftUpdates_ByDefault()
         {
-            // FreeBSD makefs default: softupdates=0
+            // current FreeBSD newfs default for UFS2: softupdates enabled
             File.WriteAllText(Path.Combine(_testDir, "test.txt"), "data");
 
             var creator = new Ufs2ImageCreator();
@@ -900,8 +918,7 @@ namespace UFS2Tool.Tests
             var sb = image.Superblock;
             Assert.True(sb.IsValid);
 
-            // Soft updates flags should NOT be set by default (FreeBSD makefs default)
-            Assert.Equal(0, sb.Flags & Ufs2Constants.FsDosoftdep);
+            Assert.NotEqual(0, sb.Flags & Ufs2Constants.FsDosoftdep);
             Assert.Equal(0, sb.Flags & Ufs2Constants.FsSuj);
         }
 
@@ -949,7 +966,6 @@ namespace UFS2Tool.Tests
             File.WriteAllText(Path.Combine(_testDir, "test.txt"), "data");
 
             var creator = new Ufs2ImageCreator();
-            creator.FilesystemFormat = 1; // makefs default
             creator.MakeFsImage(_imagePath, _testDir);
 
             using var image = new Ufs2Image(_imagePath, readOnly: true);
@@ -1086,6 +1102,45 @@ namespace UFS2Tool.Tests
             using var image = new Ufs2Image(_imagePath, readOnly: true);
             var sb = image.Superblock;
             Assert.NotEqual(0, sb.Flags & Ufs2Constants.FsDosoftdep);
+        }
+
+        [Fact]
+        public void MakeFsImage_MinFreeBelowEightKeepsTimeOptimizationByDefault()
+        {
+            File.WriteAllText(Path.Combine(_testDir, "test.txt"), "data");
+
+            var creator = new Ufs2ImageCreator
+            {
+                MinFreePercent = 0
+            };
+            creator.MakeFsImage(_imagePath, _testDir);
+
+            using var image = new Ufs2Image(_imagePath, readOnly: true);
+            Assert.Equal(Ufs2Constants.FsOptTime, image.Superblock.Optimization);
+        }
+
+        [Fact]
+        public void MakeFsImage_MaxBpgDefaultsToInt32IndirectWidth()
+        {
+            File.WriteAllText(Path.Combine(_testDir, "test.txt"), "data");
+
+            var creator = new Ufs2ImageCreator();
+            creator.MakeFsImage(_imagePath, _testDir);
+
+            using var image = new Ufs2Image(_imagePath, readOnly: true);
+            Assert.Equal(image.Superblock.BSize / sizeof(int), image.Superblock.MaxBpg);
+        }
+
+        [Fact]
+        public void MakeFsImage_DefaultRootDoesNotContainSnapDirectory()
+        {
+            File.WriteAllText(Path.Combine(_testDir, "test.txt"), "data");
+
+            var creator = new Ufs2ImageCreator();
+            creator.MakeFsImage(_imagePath, _testDir);
+
+            using var image = new Ufs2Image(_imagePath, readOnly: true);
+            Assert.DoesNotContain(image.ListRoot(), entry => entry.Name == ".snap");
         }
 
         [Fact]

@@ -4,6 +4,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using UFS2Tool;
 
 namespace UFS2Tool.Tests
@@ -28,30 +29,36 @@ namespace UFS2Tool.Tests
                 File.Delete(_imagePath);
         }
 
-        /// <summary>
-        /// Verify that fs_maxbsize is set to MAXBSIZE (65536) per FreeBSD newfs defaults.
-        /// </summary>
-        [Fact]
-        public void Superblock_MaxBSizeIsMaxBSize()
+        private static uint GetExpectedSnapGid()
         {
-            var creator = new Ufs2ImageCreator();
-            long imageSize = 256 * 1024 * 1024;
-            creator.CreateImage(_imagePath, imageSize);
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                return 0;
 
-            using var fs = new FileStream(_imagePath, FileMode.Open, FileAccess.Read);
-            using var reader = new BinaryReader(fs);
+            const string groupFile = "/etc/group";
+            if (!File.Exists(groupFile))
+                return 0;
 
-            fs.Position = Ufs2Constants.SuperblockOffset;
-            var sb = Ufs2Superblock.ReadFrom(reader);
+            foreach (string line in File.ReadLines(groupFile))
+            {
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
+                    continue;
 
-            Assert.Equal(Ufs2Constants.MaxBSize, sb.MaxBSize);
+                string[] parts = line.Split(':');
+                if (parts.Length > 2 && parts[0] == "operator" &&
+                    uint.TryParse(parts[2], out uint gid))
+                {
+                    return gid;
+                }
+            }
+
+            return 0;
         }
 
         /// <summary>
-        /// Verify that fs_maxcontig is set to maxbsize/bsize per FreeBSD mkfs.c defaults.
+        /// Verify that fs_maxbsize defaults to fs_bsize per current FreeBSD newfs.
         /// </summary>
         [Fact]
-        public void Superblock_MaxContigIsMaxBSizeDivBSize()
+        public void Superblock_MaxBSizeDefaultsToBlockSize()
         {
             var creator = new Ufs2ImageCreator();
             long imageSize = 256 * 1024 * 1024;
@@ -63,7 +70,27 @@ namespace UFS2Tool.Tests
             fs.Position = Ufs2Constants.SuperblockOffset;
             var sb = Ufs2Superblock.ReadFrom(reader);
 
-            int expectedMaxContig = Math.Max(1, Ufs2Constants.MaxBSize / sb.BSize);
+            Assert.Equal(sb.BSize, sb.MaxBSize);
+        }
+
+        /// <summary>
+        /// Verify that fs_maxcontig defaults to MAX(1, MAXPHYS / bsize) and is
+        /// raised if necessary to cover fs_maxbsize / fs_bsize.
+        /// </summary>
+        [Fact]
+        public void Superblock_MaxContigUsesCurrentFreeBsdDefault()
+        {
+            var creator = new Ufs2ImageCreator();
+            long imageSize = 256 * 1024 * 1024;
+            creator.CreateImage(_imagePath, imageSize);
+
+            using var fs = new FileStream(_imagePath, FileMode.Open, FileAccess.Read);
+            using var reader = new BinaryReader(fs);
+
+            fs.Position = Ufs2Constants.SuperblockOffset;
+            var sb = Ufs2Superblock.ReadFrom(reader);
+
+            int expectedMaxContig = Math.Max(1, (128 * 1024) / sb.BSize);
             Assert.Equal(expectedMaxContig, sb.MaxContig);
         }
 
@@ -85,6 +112,54 @@ namespace UFS2Tool.Tests
 
             int expectedContigSumSize = Math.Min(sb.MaxContig, Ufs2Constants.MaxContig);
             Assert.Equal(expectedContigSumSize, sb.ContigSumSize);
+        }
+
+        /// <summary>
+        /// Verify that fs_maxbpg defaults to one indirect block worth of block pointers.
+        /// </summary>
+        [Fact]
+        public void Superblock_MaxBpgDefaultsToIndirectBlockWidth()
+        {
+            var creator = new Ufs2ImageCreator();
+            long imageSize = 256 * 1024 * 1024;
+            creator.CreateImage(_imagePath, imageSize);
+
+            using var fs = new FileStream(_imagePath, FileMode.Open, FileAccess.Read);
+            using var reader = new BinaryReader(fs);
+
+            fs.Position = Ufs2Constants.SuperblockOffset;
+            var sb = Ufs2Superblock.ReadFrom(reader);
+
+            Assert.Equal(sb.BSize / sizeof(long), sb.MaxBpg);
+        }
+
+        /// <summary>
+        /// Verify that current FreeBSD newfs enables soft updates by default for UFS2.
+        /// </summary>
+        [Fact]
+        public void Superblock_DefaultUfs2EnablesSoftUpdates()
+        {
+            var creator = new Ufs2ImageCreator();
+            creator.CreateImage(_imagePath, 256 * 1024 * 1024);
+
+            using var image = new Ufs2Image(_imagePath, readOnly: true);
+            Assert.NotEqual(0, image.Superblock.Flags & Ufs2Constants.FsDosoftdep);
+        }
+
+        /// <summary>
+        /// Verify that minfree below 8%% defaults optimization to space, matching current FreeBSD newfs.
+        /// </summary>
+        [Fact]
+        public void Superblock_MinFreeBelowEightDefaultsOptimizationToSpace()
+        {
+            var creator = new Ufs2ImageCreator
+            {
+                MinFreePercent = 0
+            };
+            creator.CreateImage(_imagePath, 256 * 1024 * 1024);
+
+            using var image = new Ufs2Image(_imagePath, readOnly: true);
+            Assert.Equal(Ufs2Constants.FsOptSpace, image.Superblock.Optimization);
         }
 
         /// <summary>
@@ -112,7 +187,7 @@ namespace UFS2Tool.Tests
         }
 
         /// <summary>
-        /// Verify that FreeInodes = total_inodes - 3 (inodes 0, 1, 2 are used).
+        /// Verify that FreeInodes = total_inodes - 4 when .snap is present by default.
         /// </summary>
         [Fact]
         public void Superblock_FreeInodesIsCorrect()
@@ -127,8 +202,20 @@ namespace UFS2Tool.Tests
             fs.Position = Ufs2Constants.SuperblockOffset;
             var sb = Ufs2Superblock.ReadFrom(reader);
 
-            long expectedFreeInodes = (long)sb.NumCylGroups * sb.InodesPerGroup - 3;
+            long expectedFreeInodes = (long)sb.NumCylGroups * sb.InodesPerGroup - 4;
             Assert.Equal(expectedFreeInodes, sb.FreeInodes);
+        }
+
+        [Fact]
+        public void SnapDirectory_UsesOperatorGroupWhenAvailable()
+        {
+            var creator = new Ufs2ImageCreator();
+            creator.CreateImage(_imagePath, 256 * 1024 * 1024);
+
+            using var image = new Ufs2Image(_imagePath, readOnly: true);
+            var snapInode = image.ReadInode((uint)(Ufs2Constants.RootInode + 1));
+
+            Assert.Equal(GetExpectedSnapGid(), snapInode.Gid);
         }
 
         /// <summary>
@@ -313,6 +400,25 @@ namespace UFS2Tool.Tests
             // Permission bits only (lower 12 bits)
             int permBits = rootInode.Mode & 0xFFF;
             Assert.Equal(Ufs2Constants.PermDir, (ushort)permBits);
+        }
+
+        /// <summary>
+        /// Verify that an empty root directory starts as a single DIRBLKSIZ entry area
+        /// stored in one fragment, matching FreeBSD fsinit().
+        /// </summary>
+        [Fact]
+        public void RootInode_UsesFragmentSizedEmptyDirectory()
+        {
+            var creator = new Ufs2ImageCreator();
+            creator.CreateImage(_imagePath, 256 * 1024 * 1024);
+
+            using var image = new Ufs2Image(_imagePath, readOnly: true);
+            var sb = image.Superblock;
+            var rootInode = image.ReadInode(Ufs2Constants.RootInode);
+
+            Assert.Equal(Ufs2Constants.DirBlockSize, rootInode.Size);
+            Assert.Equal((long)(sb.FSize / Ufs2Constants.DefaultSectorSize), rootInode.Blocks);
+            Assert.Equal((short)3, rootInode.NLink);
         }
 
         /// <summary>
@@ -743,12 +849,14 @@ namespace UFS2Tool.Tests
                     $"csFragsFrag={csFragsFrag}, csFragsBlk={csFragsBlk}");
             }
 
-            // Root dir block [dblkno + csFragsBlk, dblkno + csFragsBlk + fpb) — should be USED
-            for (int f = dblkno + csFragsBlk; f < dblkno + csFragsBlk + sb.FragsPerBlock; f++)
+            int rootDirFrags = (Ufs2Constants.DirBlockSize + sb.FSize - 1) / sb.FSize;
+
+            // Root dir fragments [dblkno + csFragsBlk, dblkno + csFragsBlk + rootDirFrags) — should be USED
+            for (int f = dblkno + csFragsBlk; f < dblkno + csFragsBlk + rootDirFrags; f++)
             {
                 bool isFree = (bitmap[f / 8] & (1 << (f % 8))) != 0;
                 Assert.False(isFree,
-                    $"CG 0: fragment {f} (root dir block) should be USED but is marked FREE");
+                    $"CG 0: fragment {f} (root dir data) should be USED but is marked FREE");
             }
         }
 
@@ -790,18 +898,24 @@ namespace UFS2Tool.Tests
             for (long f = csAddr; f < csEnd && f < totalFrags; f++)
                 usedMap[f] = true;
 
-            // Mark root directory block (from root inode)
+            // Mark initial directory data blocks (. and .. in root, plus .snap when present)
             long inodeTableOffset = (long)sb.IblkNo * sb.FSize;
-            fs.Position = inodeTableOffset + (long)Ufs2Constants.RootInode * Ufs2Constants.Ufs2InodeSize;
-            var rootInode = Ufs2Inode.ReadFrom(reader);
-            if (rootInode.DirectBlocks[0] != 0)
+            void MarkDirectoryData(uint inodeNumber)
             {
-                long rootFrag = rootInode.DirectBlocks[0];
-                int rootFrags = (int)((rootInode.Size + sb.FSize - 1) / sb.FSize);
-                for (int f = 0; f < rootFrags; f++)
-                    if (rootFrag + f < totalFrags)
-                        usedMap[rootFrag + f] = true;
+                fs.Position = inodeTableOffset + (long)inodeNumber * Ufs2Constants.Ufs2InodeSize;
+                var inode = Ufs2Inode.ReadFrom(reader);
+                if (inode.DirectBlocks[0] == 0)
+                    return;
+
+                long frag = inode.DirectBlocks[0];
+                int dirFrags = (int)((inode.Size + sb.FSize - 1) / sb.FSize);
+                for (int f = 0; f < dirFrags; f++)
+                    if (frag + f < totalFrags)
+                        usedMap[frag + f] = true;
             }
+
+            MarkDirectoryData(Ufs2Constants.RootInode);
+            MarkDirectoryData((uint)(Ufs2Constants.RootInode + 1));
 
             // Now simulate pass5: for each CG, compute bitmap from usedMap and compare
             long sumFreeBlocks = 0, sumFreeFrags = 0;

@@ -2797,7 +2797,8 @@ namespace Ufs2Tool
                   -h avgfpdir    Expected average files per directory (default: 64)
                   -i bytes/inode Number of bytes per inode (controls inode density)
                   -m free-space  Minimum free space percentage (default: 8)
-                  -o optimization  Optimization preference: "time" (default) or "space"
+                  -o optimization  Optimization preference: auto by minfree
+                                   ("time" when minfree >= 8, otherwise "space")
                   -p partition   Partition label (informational)
                   -s size        Filesystem size in 512-byte sectors (overrides auto-detect)
 

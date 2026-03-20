@@ -25,9 +25,45 @@ namespace UFS2Tool
 
         // Estimated bytes per directory entry: header(8) + average name(16) + padding
         private const int EstimatedBytesPerDirEntry = 24;
+        private const int DefaultMaxPhys = 128 * 1024;
+        private const int MinCylinderGroups = 4;
+        private const int CgSizeFudge = 8;
+        private const int RootDirectoryInitialSize = Ufs2Constants.DirBlockSize;
+
+        private int _filesystemFormat = 2;
+        private bool _filesystemFormatExplicit;
+        private bool _softUpdates;
+        private bool _softUpdatesExplicit;
+        private string _optimizationPreference = "";
+        private bool _optimizationPreferenceExplicit;
+        private bool _noSnapDir;
+        private bool _noSnapDirExplicit;
+        private bool _makeFsDefaultsActive;
+        private bool _snapDirectoryGidResolved;
+        private uint _snapDirectoryGid;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct UnixGroup
+        {
+            public IntPtr Name;
+            public IntPtr Password;
+            public uint Gid;
+            public IntPtr Members;
+        }
+
+        [DllImport("libc", EntryPoint = "getgrnam", SetLastError = false)]
+        private static extern IntPtr GetGroupByName(string name);
 
         // -O filesystem-format: 1 = UFS1, 2 = UFS2 (default)
-        public int FilesystemFormat { get; set; } = 2;
+        public int FilesystemFormat
+        {
+            get => _makeFsDefaultsActive && !_filesystemFormatExplicit ? 1 : _filesystemFormat;
+            set
+            {
+                _filesystemFormat = value;
+                _filesystemFormatExplicit = true;
+            }
+        }
 
         // -b block-size
         public int BlockSize { get; set; } = Ufs2Constants.DefaultBlockSize;
@@ -46,7 +82,15 @@ namespace UFS2Tool
         // -m free-space (percentage)
         public int MinFreePercent { get; set; } = Ufs2Constants.DefaultMinFreePercent;
         // -o optimization ("time" or "space")
-        public string OptimizationPreference { get; set; } = "time";
+        public string OptimizationPreference
+        {
+            get => _optimizationPreference;
+            set
+            {
+                _optimizationPreference = value ?? "";
+                _optimizationPreferenceExplicit = !string.IsNullOrWhiteSpace(value);
+            }
+        }
 
         // -a maxcontig (0 = auto)
         public int MaxContig { get; set; } = 0;
@@ -71,13 +115,29 @@ namespace UFS2Tool
         // -N: dry run — do not create, just print parameters
         public bool DryRun { get; set; } = false;
         // -U: enable soft updates
-        public bool SoftUpdates { get; set; } = false;
+        public bool SoftUpdates
+        {
+            get => _softUpdates;
+            set
+            {
+                _softUpdates = value;
+                _softUpdatesExplicit = true;
+            }
+        }
         // -j: enable soft updates journaling (implies -U)
         public bool SoftUpdatesJournal { get; set; } = false;
         // -l: enable multilabel MAC
         public bool MultilabelMac { get; set; } = false;
         // -n: do not create .snap directory
-        public bool NoSnapDir { get; set; } = true;
+        public bool NoSnapDir
+        {
+            get => _noSnapDir;
+            set
+            {
+                _noSnapDir = value;
+                _noSnapDirExplicit = true;
+            }
+        }
         // -t: enable TRIM/DISCARD flag
         public bool TrimEnabled { get; set; } = false;
 
@@ -184,11 +244,7 @@ namespace UFS2Tool
         {
             int flags = 0;
 
-            // -j implies -U
-            if (SoftUpdatesJournal)
-                SoftUpdates = true;
-
-            if (SoftUpdates)
+            if (ResolveSoftUpdatesEnabled())
                 flags |= Ufs2Constants.FsDosoftdep;
             if (SoftUpdatesJournal)
                 flags |= Ufs2Constants.FsSuj;
@@ -200,6 +256,340 @@ namespace UFS2Tool
                 flags |= Ufs2Constants.FsTrim;
 
             return flags;
+        }
+
+        private readonly struct FilesystemLayout
+        {
+            public FilesystemLayout(
+                int inodesPerGroup,
+                int fragsPerGroup,
+                int numCylGroups,
+                int sblkno,
+                int cblkno,
+                int iblkno,
+                int dblkno,
+                int cgSize,
+                int csSize,
+                int csFrags,
+                int csFragsBlk,
+                int maxBSize,
+                int maxContig,
+                int maxBpg,
+                int contigSumSize,
+                int optimization,
+                string optimizationName,
+                int flags,
+                int rootDirFrags)
+            {
+                InodesPerGroup = inodesPerGroup;
+                FragsPerGroup = fragsPerGroup;
+                NumCylGroups = numCylGroups;
+                SblkNo = sblkno;
+                CblkNo = cblkno;
+                IblkNo = iblkno;
+                DblkNo = dblkno;
+                CgSize = cgSize;
+                CsSize = csSize;
+                CsFrags = csFrags;
+                CsFragsBlk = csFragsBlk;
+                MaxBSize = maxBSize;
+                MaxContig = maxContig;
+                MaxBpg = maxBpg;
+                ContigSumSize = contigSumSize;
+                Optimization = optimization;
+                OptimizationName = optimizationName;
+                Flags = flags;
+                RootDirFrags = rootDirFrags;
+            }
+
+            public int InodesPerGroup { get; }
+            public int FragsPerGroup { get; }
+            public int NumCylGroups { get; }
+            public int SblkNo { get; }
+            public int CblkNo { get; }
+            public int IblkNo { get; }
+            public int DblkNo { get; }
+            public int CgSize { get; }
+            public int CsSize { get; }
+            public int CsFrags { get; }
+            public int CsFragsBlk { get; }
+            public int MaxBSize { get; }
+            public int MaxContig { get; }
+            public int MaxBpg { get; }
+            public int ContigSumSize { get; }
+            public int Optimization { get; }
+            public string OptimizationName { get; }
+            public int Flags { get; }
+            public int RootDirFrags { get; }
+        }
+
+        private bool ResolveSoftUpdatesEnabled()
+        {
+            if (SoftUpdatesJournal)
+                return true;
+
+            if (_softUpdatesExplicit)
+                return _softUpdates;
+
+            return !_makeFsDefaultsActive && FilesystemFormat > 1;
+        }
+
+        private string ResolveOptimizationPreference()
+        {
+            if (_optimizationPreferenceExplicit)
+                return _optimizationPreference;
+
+            if (_makeFsDefaultsActive)
+                return "time";
+
+            return MinFreePercent < Ufs2Constants.DefaultMinFreePercent ? "space" : "time";
+        }
+
+        private bool ResolveNoSnapDir()
+        {
+            if (_noSnapDirExplicit)
+                return _noSnapDir;
+
+            return _makeFsDefaultsActive;
+        }
+
+        private int ResolveInitialDirectoryInodes()
+        {
+            return ResolveNoSnapDir() ? 1 : 2;
+        }
+
+        private int ResolveInitialReservedInodes()
+        {
+            return Ufs2Constants.RootInode + ResolveInitialDirectoryInodes();
+        }
+
+        private int ResolveInitialDirectoryFragments()
+        {
+            return ResolveInitialDirectoryInodes() * ((RootDirectoryInitialSize + FragmentSize - 1) / FragmentSize);
+        }
+
+        private int ResolveOptimizationValue()
+        {
+            return ResolveOptimizationPreference().Equals("space", StringComparison.OrdinalIgnoreCase)
+                ? Ufs2Constants.FsOptSpace
+                : Ufs2Constants.FsOptTime;
+        }
+
+        private int ResolveMaxBSize()
+        {
+            int requested = MaxExtentSize > 0 ? MaxExtentSize : BlockSize;
+            if (requested < BlockSize || !IsPowerOfTwo(requested))
+                return BlockSize;
+
+            int maxAllowed = Ufs2Constants.MaxContig * BlockSize;
+            return Math.Min(requested, maxAllowed);
+        }
+
+        private int ResolveMaxContig(int maxBSize)
+        {
+            int resolved = MaxContig > 0 ? MaxContig : Math.Max(1, DefaultMaxPhys / BlockSize);
+            int minForExtent = Math.Max(1, maxBSize / BlockSize);
+            return Math.Max(resolved, minForExtent);
+        }
+
+        private int ResolveMaxBpg()
+        {
+            if (MaxBpg > 0)
+                return MaxBpg;
+
+            return _makeFsDefaultsActive
+                ? (BlockSize / sizeof(int))
+                : (BlockSize / sizeof(long));
+        }
+
+        private uint ResolveSnapDirectoryGid()
+        {
+            if (_snapDirectoryGidResolved)
+                return _snapDirectoryGid;
+
+            _snapDirectoryGidResolved = true;
+            _snapDirectoryGid = 0;
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                return _snapDirectoryGid;
+
+            try
+            {
+                IntPtr groupPtr = GetGroupByName("operator");
+                if (groupPtr != IntPtr.Zero)
+                    _snapDirectoryGid = Marshal.PtrToStructure<UnixGroup>(groupPtr).Gid;
+            }
+            catch
+            {
+                _snapDirectoryGid = 0;
+            }
+
+            return _snapDirectoryGid;
+        }
+
+        private int CalculateInitialDirectoryTailFree(int fragsPerBlock)
+        {
+            int initialDirFrags = ResolveInitialDirectoryFragments();
+            int remainder = initialDirFrags % fragsPerBlock;
+            return remainder == 0 ? 0 : fragsPerBlock - remainder;
+        }
+
+        private int ComputeCgSizeRaw(int fragsPerGroup, int inodesPerGroup, int contigSumSize)
+        {
+            int oldCpg = (FilesystemFormat == 1) ? 1 : 0;
+            int inodeBitmapSize = (inodesPerGroup + 7) / 8;
+            int fragBitmapSize = (fragsPerGroup + 7) / 8;
+            int cgSizeRaw = Ufs2Constants.CgHeaderBaseSize
+                + oldCpg * 4
+                + oldCpg * 2
+                + inodeBitmapSize
+                + fragBitmapSize
+                + 4;
+
+            if (contigSumSize > 0)
+            {
+                int blocksPerGroup = fragsPerGroup / (BlockSize / FragmentSize);
+                cgSizeRaw += contigSumSize * 4 + (blocksPerGroup + 7) / 8;
+            }
+
+            return cgSizeRaw;
+        }
+
+        private FilesystemLayout ResolveFilesystemLayout(long totalSizeBytes)
+        {
+            long totalFrags = totalSizeBytes / FragmentSize;
+            int fragsPerBlock = BlockSize / FragmentSize;
+            int inodeSize = InodeSizeForFormat;
+            int inodesPerBlock = BlockSize / inodeSize;
+            int inodesPerFrag = Math.Max(1, inodesPerBlock / fragsPerBlock);
+            long maxinum = (1L << 32) - inodesPerBlock;
+            long minFragsPerInode = 1 + totalFrags / maxinum;
+            int density = BytesPerInode > 0
+                ? BytesPerInode
+                : (int)(Math.Max((long)Ufs2Constants.DefaultFragsPerInode, minFragsPerInode) * FragmentSize);
+            int minDensity = (int)Math.Min((long)int.MaxValue, minFragsPerInode * FragmentSize);
+            if (density < minDensity)
+                density = minDensity;
+            int fragsPerInodeDensity = Math.Max((density + FragmentSize - 1) / FragmentSize, 1);
+
+            int sblkno = AlignUpInt(
+                (Ufs2Constants.SuperblockOffset + Ufs2Constants.SuperblockSize + FragmentSize - 1) / FragmentSize,
+                fragsPerBlock);
+            int cblkno = sblkno + AlignUpInt(
+                (Ufs2Constants.SuperblockSize + FragmentSize - 1) / FragmentSize,
+                fragsPerBlock);
+            int iblkno = cblkno + fragsPerBlock;
+
+            int maxBSize = ResolveMaxBSize();
+            int maxContig = ResolveMaxContig(maxBSize);
+            int contigSumSize = maxContig > 1 ? Math.Min(maxContig, Ufs2Constants.MaxContig) : 0;
+
+            int inodesPerGroup;
+            int fragsPerGroup;
+
+            if (BlocksPerCylGroup > 0)
+            {
+                fragsPerGroup = BlocksPerCylGroup * fragsPerBlock;
+                if (fragsPerGroup <= 0)
+                    fragsPerGroup = fragsPerBlock;
+
+                inodesPerGroup = Math.Max(inodesPerBlock,
+                    ((int)((fragsPerGroup + (long)fragsPerInodeDensity - 1) / fragsPerInodeDensity) + inodesPerBlock - 1) / inodesPerBlock * inodesPerBlock);
+            }
+            else
+            {
+                while (true)
+                {
+                    int fragsPerInode = Math.Max((density + FragmentSize - 1) / FragmentSize, 1);
+                    fragsPerInodeDensity = fragsPerInode;
+                    long minFpgLong = (long)fragsPerInodeDensity * inodesPerBlock;
+                    int minFpg = (int)Math.Min(minFpgLong, totalFrags);
+
+                    inodesPerGroup = inodesPerBlock;
+                    fragsPerGroup = AlignUpInt(iblkno + inodesPerGroup / inodesPerFrag, fragsPerBlock);
+                    if (fragsPerGroup < minFpg)
+                        fragsPerGroup = minFpg;
+
+                    inodesPerGroup = AlignUpInt((int)((fragsPerGroup + (long)fragsPerInodeDensity - 1) / fragsPerInodeDensity), inodesPerBlock);
+                    fragsPerGroup = AlignUpInt(iblkno + inodesPerGroup / inodesPerFrag, fragsPerBlock);
+                    if (fragsPerGroup < minFpg)
+                        fragsPerGroup = minFpg;
+
+                    inodesPerGroup = AlignUpInt((int)((fragsPerGroup + (long)fragsPerInodeDensity - 1) / fragsPerInodeDensity), inodesPerBlock);
+                    if (ComputeCgSizeRaw(fragsPerGroup, inodesPerGroup, contigSumSize) < BlockSize - CgSizeFudge)
+                        break;
+
+                    density -= FragmentSize;
+                    if (density <= FragmentSize)
+                        break;
+                }
+
+                for (; fragsPerGroup < totalFrags; fragsPerGroup += fragsPerBlock)
+                {
+                    inodesPerGroup = AlignUpInt((int)((fragsPerGroup + (long)fragsPerInodeDensity - 1) /
+                        fragsPerInodeDensity), inodesPerBlock);
+                    if (FilesystemFormat == 2 || (FilesystemFormat == 1 && inodesPerGroup <= 0x7fff))
+                    {
+                        if (totalFrags / fragsPerGroup < MinCylinderGroups)
+                            break;
+
+                        int cgSizeRaw = ComputeCgSizeRaw(fragsPerGroup, inodesPerGroup, contigSumSize);
+                        if (cgSizeRaw < BlockSize - CgSizeFudge)
+                            continue;
+                        if (cgSizeRaw == BlockSize - CgSizeFudge)
+                            break;
+                    }
+
+                    fragsPerGroup -= fragsPerBlock;
+                    inodesPerGroup = AlignUpInt((int)((fragsPerGroup + (long)fragsPerInodeDensity - 1) /
+                        fragsPerInodeDensity), inodesPerBlock);
+                    break;
+                }
+
+                while (true)
+                {
+                    int numCg = Math.Max(1, (int)((totalFrags + fragsPerGroup - 1) / fragsPerGroup));
+                    int lastMinFpg = AlignUpInt(iblkno + inodesPerGroup / inodesPerFrag, fragsPerBlock);
+                    long remainder = totalFrags % fragsPerGroup;
+                    if (remainder == 0 || remainder >= lastMinFpg)
+                        break;
+
+                    fragsPerGroup -= fragsPerBlock;
+                    inodesPerGroup = AlignUpInt((int)((fragsPerGroup + (long)fragsPerInodeDensity - 1) /
+                        fragsPerInodeDensity), inodesPerBlock);
+                    if (numCg <= 1)
+                        break;
+                }
+            }
+
+            int dblkno = iblkno + inodesPerGroup / inodesPerFrag;
+            int numCylGroups = Math.Max(1, (int)((totalFrags + fragsPerGroup - 1) / fragsPerGroup));
+            int cgSize = AlignUpInt(ComputeCgSizeRaw(fragsPerGroup, inodesPerGroup, contigSumSize), FragmentSize);
+            int csSize = AlignUpInt(numCylGroups * Ufs2Constants.CsumStructSize, FragmentSize);
+            int csFrags = (csSize + FragmentSize - 1) / FragmentSize;
+            int csFragsBlk = ((csSize + BlockSize - 1) / BlockSize) * fragsPerBlock;
+            int rootDirFrags = ResolveInitialDirectoryFragments();
+
+            return new FilesystemLayout(
+                inodesPerGroup,
+                fragsPerGroup,
+                numCylGroups,
+                sblkno,
+                cblkno,
+                iblkno,
+                dblkno,
+                cgSize,
+                csSize,
+                csFrags,
+                csFragsBlk,
+                maxBSize,
+                maxContig,
+                ResolveMaxBpg(),
+                contigSumSize,
+                ResolveOptimizationValue(),
+                ResolveOptimizationPreference(),
+                ComputeFlags(),
+                rootDirFrags);
         }
 
         /// <summary>
@@ -331,17 +721,8 @@ namespace UFS2Tool
         /// </summary>
         private void PrintNewfsParameters(long totalSizeBytes)
         {
-            int fragsPerBlock = BlockSize / FragmentSize;
-            long totalFrags = totalSizeBytes / FragmentSize;
             int inodeSize = InodeSizeForFormat;
-            int inodesPerGroup = ComputeInodesPerGroup(totalSizeBytes);
-
-            int fragsPerGroup = inodesPerGroup * fragsPerBlock;
-            int numCylGroups = (int)((totalFrags + fragsPerGroup - 1) / fragsPerGroup);
-            if (numCylGroups < 1) numCylGroups = 1;
-
-            fragsPerGroup = (int)(totalFrags / numCylGroups);
-            fragsPerGroup = (fragsPerGroup / fragsPerBlock) * fragsPerBlock;
+            var layout = ResolveFilesystemLayout(totalSizeBytes);
 
             string formatStr = (FilesystemFormat == 1) ? "UFS1" : "UFS2";
             (Output ?? Console.Out).WriteLine($"  Format:        {formatStr} (-O {FilesystemFormat})");
@@ -350,21 +731,20 @@ namespace UFS2Tool
             (Output ?? Console.Out).WriteLine($"  Sector size:   {SectorSize} bytes (-S)");
             (Output ?? Console.Out).WriteLine($"  Inode size:    {inodeSize} bytes");
             (Output ?? Console.Out).WriteLine($"  Total size:    {totalSizeBytes:N0} bytes ({totalSizeBytes / (1024 * 1024)} MB)");
-            (Output ?? Console.Out).WriteLine($"  Cylinder groups: {numCylGroups}");
-            (Output ?? Console.Out).WriteLine($"  Frags/group:   {fragsPerGroup}");
-            (Output ?? Console.Out).WriteLine($"  Inodes/group:  {inodesPerGroup}");
+            (Output ?? Console.Out).WriteLine($"  Cylinder groups: {layout.NumCylGroups}");
+            (Output ?? Console.Out).WriteLine($"  Frags/group:   {layout.FragsPerGroup}");
+            (Output ?? Console.Out).WriteLine($"  Inodes/group:  {layout.InodesPerGroup}");
             (Output ?? Console.Out).WriteLine($"  Min free:      {MinFreePercent}% (-m)");
-            (Output ?? Console.Out).WriteLine($"  Optimization:  {OptimizationPreference} (-o)");
+            (Output ?? Console.Out).WriteLine($"  Optimization:  {layout.OptimizationName} (-o)");
 
-            int flags = ComputeFlags();
-            if (flags != 0)
+            if (layout.Flags != 0)
             {
                 var flagNames = new System.Collections.Generic.List<string>();
-                if ((flags & Ufs2Constants.FsDosoftdep) != 0) flagNames.Add("SOFTUPDATES");
-                if ((flags & Ufs2Constants.FsSuj) != 0) flagNames.Add("SUJ");
-                if ((flags & Ufs2Constants.FsGjournal) != 0) flagNames.Add("GJOURNAL");
-                if ((flags & Ufs2Constants.FsMultilabel) != 0) flagNames.Add("MULTILABEL");
-                if ((flags & Ufs2Constants.FsTrim) != 0) flagNames.Add("TRIM");
+                if ((layout.Flags & Ufs2Constants.FsDosoftdep) != 0) flagNames.Add("SOFTUPDATES");
+                if ((layout.Flags & Ufs2Constants.FsSuj) != 0) flagNames.Add("SUJ");
+                if ((layout.Flags & Ufs2Constants.FsGjournal) != 0) flagNames.Add("GJOURNAL");
+                if ((layout.Flags & Ufs2Constants.FsMultilabel) != 0) flagNames.Add("MULTILABEL");
+                if ((layout.Flags & Ufs2Constants.FsTrim) != 0) flagNames.Add("TRIM");
                 (Output ?? Console.Out).WriteLine($"  Flags:         {string.Join(", ", flagNames)}");
             }
 
@@ -380,28 +760,7 @@ namespace UFS2Tool
         /// </summary>
         private int ComputeInodesPerGroup(long totalSizeBytes)
         {
-            if (BytesPerInode > 0)
-            {
-                // User specified -i bytes-per-inode
-                long totalInodes = totalSizeBytes / BytesPerInode;
-                int fragsPerBlock = BlockSize / FragmentSize;
-                int fragsPerGroup = InodesPerGroup * fragsPerBlock;
-                long totalFrags = totalSizeBytes / FragmentSize;
-                int numCylGroups = (int)((totalFrags + fragsPerGroup - 1) / fragsPerGroup);
-                if (numCylGroups < 1) numCylGroups = 1;
-
-                int ipg = (int)(totalInodes / numCylGroups);
-                int inodeSize = InodeSizeForFormat;
-
-                // Round up to fill a complete block of inodes
-                int inodesPerBlock = BlockSize / inodeSize;
-                if (inodesPerBlock > 0)
-                    ipg = ((ipg + inodesPerBlock - 1) / inodesPerBlock) * inodesPerBlock;
-
-                return Math.Max(ipg, inodesPerBlock);
-            }
-
-            return InodesPerGroup;
+            return ResolveFilesystemLayout(totalSizeBytes).InodesPerGroup;
         }
 
         /// <summary>
@@ -414,92 +773,31 @@ namespace UFS2Tool
             long totalFrags = totalSizeBytes / FragmentSize;
             int inodeSize = InodeSizeForFormat;
             int magic = MagicForFormat;
-
-            int inodesPerGroup = ComputeInodesPerGroup(totalSizeBytes);
-
-            // Calculate cylinder groups
-            int fragsPerGroup;
-            if (BlocksPerCylGroup > 0)
-            {
-                fragsPerGroup = BlocksPerCylGroup * fragsPerBlock;
-            }
-            else
-            {
-                fragsPerGroup = inodesPerGroup * fragsPerBlock;
-            }
-            int numCylGroups = (int)((totalFrags + fragsPerGroup - 1) / fragsPerGroup);
-            if (numCylGroups < 1) numCylGroups = 1;
+            var layout = ResolveFilesystemLayout(totalSizeBytes);
+            int inodesPerGroup = layout.InodesPerGroup;
+            int fragsPerGroup = layout.FragsPerGroup;
+            int numCylGroups = layout.NumCylGroups;
 
             int bShift = Log2(BlockSize);
             int fShift = Log2(FragmentSize);
 
-            // Compute CG layout offsets per FreeBSD mkfs.c formulas
-            // fs_sblkno: first fragment after boot area + superblock, block-aligned
-            int sblkno = AlignUpInt(
-                (Ufs2Constants.SuperblockOffset + Ufs2Constants.SuperblockSize + FragmentSize - 1) / FragmentSize,
-                fragsPerBlock);
-            // fs_cblkno: CG header follows superblock backup area
-            int cblkno = sblkno + AlignUpInt(
-                (Ufs2Constants.SuperblockSize + FragmentSize - 1) / FragmentSize,
-                fragsPerBlock);
-            // fs_iblkno: inode blocks follow CG header (1 block)
-            int iblkno = cblkno + fragsPerBlock;
-            // Inode blocks per CG
-            int inopb = BlockSize / inodeSize;
-            int inodeblks = ((inodesPerGroup + inopb - 1) / inopb) * fragsPerBlock;
-            // fs_dblkno: data blocks follow inode blocks
-            int dblkno = iblkno + inodeblks;
-
-            // fs_maxbsize: maximum block size (MAXBSIZE = 65536 per FreeBSD)
-            int maxBSize = Ufs2Constants.MaxBSize;
-            // fs_maxcontig: default is maxbsize/bsize per FreeBSD mkfs.c
-            int maxContig = MaxContig > 0 ? MaxContig : Math.Max(1, maxBSize / BlockSize);
-
-            // fs_cgsize: CG header size rounded up to fragment boundary
-            // Matches FreeBSD CGSIZE() macro from sys/ufs/ffs/fs.h
-            // CGSIZE = sizeof(struct cg) + fs_old_cpg*sizeof(int32) + fs_old_cpg*sizeof(uint16)
-            //        + howmany(fs_ipg,8) + howmany(fs_fpg,8) + sizeof(int32)
-            //        + (contigsumsize>0 ? contigsumsize*sizeof(int32) + howmany(fpg/frag,8) : 0)
-            int cgFixedHeaderSize = Ufs2Constants.CgHeaderBaseSize;
-            // For UFS2, fs_old_cpg = 0 (not used); for UFS1, fs_old_cpg = 1
-            int oldCpg = (FilesystemFormat == 1) ? 1 : 0;
-            int oldBtotSize = oldCpg * 4; // fs_old_cpg * sizeof(int32_t)
-            int oldBoffSize = oldCpg * 2; // fs_old_cpg * sizeof(uint16_t)
-            int inodeBitmapSize = (inodesPerGroup + 7) / 8;
-            int fragBitmapSize = (fragsPerGroup + 7) / 8;
-            int contigSumSize = Math.Min(maxContig, Ufs2Constants.MaxContig);
-            int cgSizeRaw = cgFixedHeaderSize + oldBtotSize + oldBoffSize
-                          + inodeBitmapSize + fragBitmapSize + 4; // +4 = sizeof(int32_t) per CGSIZE
-            if (contigSumSize > 0)
-            {
-                int blocksPerGroup = fragsPerGroup / fragsPerBlock;
-                cgSizeRaw += contigSumSize * 4 + (blocksPerGroup + 7) / 8;
-            }
-            int cgSize = AlignUpInt(cgSizeRaw, FragmentSize);
-
-            // fs_cssize: cylinder group summary size
-            int csumStructSize = Ufs2Constants.CsumStructSize;
-            int csSize = AlignUpInt(numCylGroups * csumStructSize, FragmentSize);
-
-            // fs_csaddr: address of CG summary area (first data block of CG 0)
+            int sblkno = layout.SblkNo;
+            int cblkno = layout.CblkNo;
+            int iblkno = layout.IblkNo;
+            int dblkno = layout.DblkNo;
+            int cgSize = layout.CgSize;
+            int csSize = layout.CsSize;
             long csAddr = dblkno;
-            // Number of fragments occupied by CG summary data (fragment-aligned).
-            // Per FreeBSD mkfs.c: csfrags = howmany(cssize, fsize).
-            // fsck_ffs pass1.c marks exactly this many fragments as used for the
-            // CG summary area, so the bitmap must match.
-            int csFrags = (csSize + FragmentSize - 1) / FragmentSize;
-            // Block-aligned CG summary size — subsequent data blocks (root dir)
-            // must start at block boundaries.
-            int csFragsBlk = ((csSize + BlockSize - 1) / BlockSize) * fragsPerBlock;
+            int csFrags = layout.CsFrags;
+            int csFragsBlk = layout.CsFragsBlk;
             // Tail-free fragments in the CG summary's last partial block.
             // Per FreeBSD initcg(): if dupper (= dblkno + csFrags) is not block-
             // aligned, the remaining fragments to the next block boundary are FREE.
             int csSummaryTailFree = csFragsBlk - csFrags;
 
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            int fsFlags = ComputeFlags();
-            int optimVal = OptimizationPreference.Equals("space", StringComparison.OrdinalIgnoreCase)
-                ? Ufs2Constants.FsOptSpace : Ufs2Constants.FsOptTime;
+            int fsFlags = layout.Flags;
+            int optimVal = layout.Optimization;
 
             // Generate filesystem ID from timestamp
             int fsId0 = (int)(now & 0xFFFFFFFF);
@@ -539,8 +837,8 @@ namespace UFS2Tool
                 FreeBlocks = 0,
                 FreeFragments = 0,
                 // 3 inodes used in CG 0: reserved 0, reserved 1, root inode 2
-                FreeInodes = numCylGroups * inodesPerGroup - 3,
-                Directories = 1,
+                FreeInodes = numCylGroups * inodesPerGroup - ResolveInitialReservedInodes(),
+                Directories = ResolveInitialDirectoryInodes(),
                 Time = now,
                 VolumeName = VolumeName,
                 MountPoint = "/",
@@ -563,8 +861,8 @@ namespace UFS2Tool
                 FsId1 = fsId1,
                 MinFreePercent = MinFreePercent,
                 Optimization = optimVal,
-                MaxContig = maxContig,
-                MaxBpg = MaxBpg > 0 ? MaxBpg : inodesPerGroup,
+                MaxContig = layout.MaxContig,
+                MaxBpg = layout.MaxBpg,
                 AvgFileSize = AvgFileSize,
                 AvgFilesPerDir = AvgFilesPerDir,
                 MaxSymlinkLen = maxSymlinkLen,
@@ -573,8 +871,8 @@ namespace UFS2Tool
                 OldInodeFmt = Ufs2Constants.Fs44InodeFmt,
                 MaxFileSize = maxFileSize,
                 SbBlockLoc = Ufs2Constants.SuperblockOffset,
-                MaxBSize = maxBSize,
-                ContigSumSize = contigSumSize,
+                MaxBSize = layout.MaxBSize,
+                ContigSumSize = layout.ContigSumSize,
                 // fs_providersize: size of underlying provider in fragments
                 // Per FreeBSD newfs: dbtofsb(mediasize / sectorsize)
                 ProviderSize = totalFrags,
@@ -613,7 +911,7 @@ namespace UFS2Tool
                 int dataFragsInCg = usableFragsInCg - dblkno;
                 // CG 0: CG summary area (block-aligned) + root directory use space
                 if (cg == 0)
-                    dataFragsInCg -= csFragsBlk + fragsPerBlock;
+                    dataFragsInCg -= csFragsBlk + layout.RootDirFrags;
                 totalFreeDataFrags += dataFragsInCg;
 
                 // CG header at cgtod(fs, cg) = cgstart + cblkno
@@ -621,14 +919,14 @@ namespace UFS2Tool
 
                 byte[] cgData = SerializeCylinderGroupHeader(
                     cg, usableFragsInCg, dataFragsInCg, inodesPerGroup, now,
-                    dblkno, fragsPerBlock, inodeSize, contigSumSize,
-                    fragsPerGroup, csFrags, csFragsBlk, sblkno);
+                    dblkno, fragsPerBlock, inodeSize, layout.ContigSumSize,
+                    fragsPerGroup, csFrags, csFragsBlk, sblkno, layout.RootDirFrags);
                 target.WriteAligned(cgData, cgHeaderOffset);
 
                 // Write per-CG summary (struct csum) into the CG summary area
-                int usedInodes = (cg == 0) ? 3 : 0;
+                int usedInodes = (cg == 0) ? ResolveInitialReservedInodes() : 0;
                 int freeInodesInCg = inodesPerGroup - usedInodes;
-                int dirs = (cg == 0) ? 1 : 0;
+                int dirs = (cg == 0) ? ResolveInitialDirectoryInodes() : 0;
                 // Per FreeBSD mkfs.c initcg():
                 // For CG > 0: blocks [0, sblkno) are also free (both regions are block-aligned).
                 // For CG 0: CG summary tail fragments are free but NOT block-aligned,
@@ -639,8 +937,10 @@ namespace UFS2Tool
                 if (cg == 0)
                 {
                     // Data area starts at block boundary; CG summary tail does NOT
-                    freeBlocks = dataFragsInCg / fragsPerBlock;
-                    freeFragsRem = csSummaryTailFree + (dataFragsInCg % fragsPerBlock);
+                    int initialDirTailFree = CalculateInitialDirectoryTailFree(fragsPerBlock);
+                    int blockAlignedFreeDataFrags = Math.Max(0, dataFragsInCg - initialDirTailFree);
+                    freeBlocks = blockAlignedFreeDataFrags / fragsPerBlock;
+                    freeFragsRem = csSummaryTailFree + initialDirTailFree + (blockAlignedFreeDataFrags % fragsPerBlock);
                 }
                 else
                 {
@@ -665,8 +965,10 @@ namespace UFS2Tool
                 // Inode table at cgimin(fs, cg) = cgstart + iblkno
                 long inodeTableOffset = cgStartByte + (long)iblkno * FragmentSize;
 
+                long rootDataFrag = cgStartFrag + dblkno + csFragsBlk;
+                long snapDataFrag = rootDataFrag + ((RootDirectoryInitialSize + FragmentSize - 1) / FragmentSize);
                 byte[] inodeTableData = SerializeInodeTable(
-                    cg, inodesPerGroup, now, cgStartFrag + dblkno + csFragsBlk, inodeSize);
+                    cg, inodesPerGroup, now, rootDataFrag, snapDataFrag, inodeSize);
                 target.WriteAligned(inodeTableData, inodeTableOffset);
 
                 // CG 0: write CG summary area and root directory data
@@ -679,6 +981,12 @@ namespace UFS2Tool
                     long rootDataOffset = (cgStartFrag + dblkno + csFragsBlk) * FragmentSize;
                     byte[] rootDirData = SerializeRootDirectoryBlock();
                     target.WriteAligned(rootDirData, rootDataOffset);
+                    if (!ResolveNoSnapDir())
+                    {
+                        long snapDataOffset = rootDataOffset + ((long)((RootDirectoryInitialSize + FragmentSize - 1) / FragmentSize) * FragmentSize);
+                        byte[] snapDirData = SerializeSnapDirectoryBlock();
+                        target.WriteAligned(snapDirData, snapDataOffset);
+                    }
                 }
 
                 // Backup superblock at cgsblock(fs, cg) = cgstart + sblkno
@@ -783,7 +1091,7 @@ namespace UFS2Tool
         private byte[] SerializeCylinderGroupHeader(int cgIndex, int totalFragsInCg,
             int freeDataFrags, int inodesInCg, long timestamp, int dataStartFrag,
             int fragsPerBlock, int inodeSize, int contigSumSize,
-            int fragsPerGroup, int csFrags, int csFragsBlk, int sblkno)
+            int fragsPerGroup, int csFrags, int csFragsBlk, int sblkno, int rootDirFrags)
         {
             // Compute bitmap sizes
             // Per FreeBSD mkfs.c/fsck_ffs, bitmap sizes always use fs_fpg/fs_ipg
@@ -845,13 +1153,14 @@ namespace UFS2Tool
             using var ms = new MemoryStream(cgBlock);
             using var bw = new BinaryWriter(ms);
 
-            int usedInodes = (cgIndex == 0) ? 3 : 0; // root inode + 2 reserved
+            int usedInodes = (cgIndex == 0) ? ResolveInitialReservedInodes() : 0; // reserved + root (+ .snap)
             int freeInodes = inodesInCg - usedInodes;
             // Per FreeBSD mkfs.c initcg(): for CG > 0, blocks [0, sblkno) are free
             // (boot/superblock area is only needed in CG 0).
             // For CG 0: tail fragments of the CG summary's last partial block are free
             // (the CG summary only occupies csFrags fragments, not csFragsBlk).
             int csSummaryTailFree = (cgIndex == 0) ? csFragsBlk - csFrags : 0;
+            int initialDirTailFree = (cgIndex == 0) ? CalculateInitialDirectoryTailFree(fragsPerBlock) : 0;
             // Compute free blocks and free fragment remainders.
             // CG summary tail fragments are NOT block-aligned, so they must be
             // counted separately as free fragments (never form a complete free block).
@@ -859,8 +1168,9 @@ namespace UFS2Tool
             int freeFrags;
             if (cgIndex == 0)
             {
-                freeBlocks = freeDataFrags / fragsPerBlock;
-                freeFrags = csSummaryTailFree + (freeDataFrags % fragsPerBlock);
+                int blockAlignedFreeDataFrags = Math.Max(0, freeDataFrags - initialDirTailFree);
+                freeBlocks = blockAlignedFreeDataFrags / fragsPerBlock;
+                freeFrags = csSummaryTailFree + initialDirTailFree + (blockAlignedFreeDataFrags % fragsPerBlock);
             }
             else
             {
@@ -868,7 +1178,7 @@ namespace UFS2Tool
                 freeBlocks = totalFreeFrags / fragsPerBlock;
                 freeFrags = totalFreeFrags % fragsPerBlock;
             }
-            int dirs = (cgIndex == 0) ? 1 : 0;
+            int dirs = (cgIndex == 0) ? ResolveInitialDirectoryInodes() : 0;
 
             // Fixed CG header fields (struct cg)
             // cg_firstfield (0x00)
@@ -999,8 +1309,9 @@ namespace UFS2Tool
             // CG 0: skip CG summary area (fragment-aligned) + root directory's data block
             //   CG summary occupies [dataStartFrag, dataStartFrag + csFrags) — USED
             //   Tail of CG summary's last block [dataStartFrag + csFrags, dataStartFrag + csFragsBlk) — FREE
-            //   Root dir block [dataStartFrag + csFragsBlk, dataStartFrag + csFragsBlk + fragsPerBlock) — USED
-            //   Data area [dataStartFrag + csFragsBlk + fragsPerBlock, end) — FREE
+            //   Initial directory extents [dataStartFrag + csFragsBlk,
+            //       dataStartFrag + csFragsBlk + rootDirFrags) — USED
+            //   Data area [dataStartFrag + csFragsBlk + rootDirFrags, end) — FREE
             int firstFreeFrag = dataStartFrag;
             if (cgIndex == 0)
             {
@@ -1012,8 +1323,8 @@ namespace UFS2Tool
                     if (byteIdx < fragBitmapBytes)
                         fragBitmap[byteIdx] |= (byte)(1 << bitIdx);
                 }
-                // Data area starts after block-aligned CG summary + root dir block
-                firstFreeFrag = dataStartFrag + csFragsBlk + fragsPerBlock;
+                // Data area starts after block-aligned CG summary + initial root directory fragment allocation
+                firstFreeFrag = dataStartFrag + csFragsBlk + rootDirFrags;
             }
             for (int f = firstFreeFrag; f < totalFragsInCg; f++)
             {
@@ -1094,7 +1405,7 @@ namespace UFS2Tool
         }
 
         private byte[] SerializeInodeTable(int cgIndex, int inodesInCg,
-            long timestamp, long rootDataBlockFrag, int inodeSize)
+            long timestamp, long rootDataBlockFrag, long snapDataBlockFrag, int inodeSize)
         {
             int rawSize = inodesInCg * inodeSize;
             int alignedSize = AlignUpInt(rawSize, SectorSize);
@@ -1128,6 +1439,13 @@ namespace UFS2Tool
                     else
                         WriteUfs2RootInode(writer, timestamp, rootDataBlockFrag);
                 }
+                else if (cgIndex == 0 && !ResolveNoSnapDir() && i == Ufs2Constants.RootInode + 1)
+                {
+                    if (FilesystemFormat == 1)
+                        WriteUfs1SnapInode(writer, timestamp, snapDataBlockFrag);
+                    else
+                        WriteUfs2SnapInode(writer, timestamp, snapDataBlockFrag);
+                }
                 else if (i < initedInodes)
                 {
                     // Write an inode with only di_gen set (all other fields zero).
@@ -1151,15 +1469,17 @@ namespace UFS2Tool
 
         private void WriteUfs2RootInode(BinaryWriter writer, long timestamp, long rootDataBlockFrag)
         {
+            long rootBlocks512 = (long)((RootDirectoryInitialSize + FragmentSize - 1) / FragmentSize)
+                * (FragmentSize / Ufs2Constants.DefaultSectorSize);
             var rootInode = new Ufs2Inode
             {
                 Mode = (ushort)(Ufs2Constants.IfDir | Ufs2Constants.PermDir),
-                NLink = 2,
+                NLink = (short)(ResolveNoSnapDir() ? 2 : 3),
                 Uid = 0,
                 Gid = 0,
                 BlkSize = (uint)BlockSize,
-                Size = BlockSize,
-                Blocks = BlockSize / Ufs2Constants.DefaultSectorSize,
+                Size = RootDirectoryInitialSize,
+                Blocks = rootBlocks512,
                 AccessTime = timestamp,
                 ModTime = timestamp,
                 ChangeTime = timestamp,
@@ -1173,14 +1493,16 @@ namespace UFS2Tool
         private void WriteUfs1RootInode(BinaryWriter writer, long timestamp, long rootDataBlockFrag)
         {
             int time32 = (int)(timestamp & 0xFFFFFFFF);
+            int rootBlocks512 = ((RootDirectoryInitialSize + FragmentSize - 1) / FragmentSize)
+                * (FragmentSize / Ufs2Constants.DefaultSectorSize);
             var rootInode = new Ufs1Inode
             {
                 Mode = (ushort)(Ufs2Constants.IfDir | Ufs2Constants.PermDir),
-                NLink = 2,
+                NLink = (short)(ResolveNoSnapDir() ? 2 : 3),
                 Uid = 0,
                 Gid = 0,
-                Size = BlockSize,
-                Blocks = BlockSize / Ufs2Constants.DefaultSectorSize,
+                Size = RootDirectoryInitialSize,
+                Blocks = rootBlocks512,
                 AccessTime = time32,
                 ModTime = time32,
                 ChangeTime = time32,
@@ -1190,9 +1512,56 @@ namespace UFS2Tool
             rootInode.WriteTo(writer);
         }
 
+        private void WriteUfs2SnapInode(BinaryWriter writer, long timestamp, long snapDataBlockFrag)
+        {
+            long snapBlocks512 = (long)((RootDirectoryInitialSize + FragmentSize - 1) / FragmentSize)
+                * (FragmentSize / Ufs2Constants.DefaultSectorSize);
+            var snapInode = new Ufs2Inode
+            {
+                Mode = (ushort)(Ufs2Constants.IfDir | 0x1FD), // 0775
+                NLink = 2,
+                Uid = 0,
+                Gid = ResolveSnapDirectoryGid(),
+                BlkSize = (uint)BlockSize,
+                Size = RootDirectoryInitialSize,
+                Blocks = snapBlocks512,
+                AccessTime = timestamp,
+                ModTime = timestamp,
+                ChangeTime = timestamp,
+                CreateTime = timestamp,
+                Generation = 1,
+                DirDepth = 1
+            };
+            snapInode.DirectBlocks[0] = snapDataBlockFrag;
+            snapInode.WriteTo(writer);
+        }
+
+        private void WriteUfs1SnapInode(BinaryWriter writer, long timestamp, long snapDataBlockFrag)
+        {
+            int time32 = (int)(timestamp & 0xFFFFFFFF);
+            int snapBlocks512 = ((RootDirectoryInitialSize + FragmentSize - 1) / FragmentSize)
+                * (FragmentSize / Ufs2Constants.DefaultSectorSize);
+            var snapInode = new Ufs1Inode
+            {
+                Mode = (ushort)(Ufs2Constants.IfDir | 0x1FD), // 0775
+                NLink = 2,
+                DirDepth = 1,
+                Uid = 0,
+                Gid = ResolveSnapDirectoryGid(),
+                Size = RootDirectoryInitialSize,
+                Blocks = snapBlocks512,
+                AccessTime = time32,
+                ModTime = time32,
+                ChangeTime = time32,
+                Generation = 1
+            };
+            snapInode.DirectBlocks[0] = (int)snapDataBlockFrag;
+            snapInode.WriteTo(writer);
+        }
+
         private byte[] SerializeRootDirectoryBlock()
         {
-            int alignedSize = AlignUpInt(BlockSize, SectorSize);
+            int alignedSize = AlignUpInt(FragmentSize, SectorSize);
             byte[] data = new byte[alignedSize];
 
             using var ms = new MemoryStream(data);
@@ -1216,7 +1585,7 @@ namespace UFS2Tool
             int posInChunk = (int)(ms.Position % dirBlkSiz);
             int remainingInChunk = dirBlkSiz - posInChunk;
 
-            if (!NoSnapDir)
+            if (!ResolveNoSnapDir())
             {
                 // ".." entry with room for .snap
                 var dotDotEntry = new Ufs2DirectoryEntry
@@ -1233,12 +1602,10 @@ namespace UFS2Tool
                 remainingInChunk = dirBlkSiz - posInChunk;
 
                 // .snap directory entry (FreeBSD creates this by default)
-                // We write an empty placeholder - actual .snap inode would need allocation
-                // For newfs compatibility, we just reserve space like FreeBSD does
                 var snapEntry = new Ufs2DirectoryEntry
                 {
-                    Inode = 0, // No inode allocated - placeholder
-                    FileType = Ufs2Constants.DtUnknown,
+                    Inode = Ufs2Constants.RootInode + 1,
+                    FileType = Ufs2Constants.DtDir,
                     NameLength = 5,
                     Name = ".snap",
                     RecordLength = (ushort)remainingInChunk
@@ -1259,10 +1626,58 @@ namespace UFS2Tool
                 dotDotEntry.WriteTo(writer);
             }
 
-            // Fill remaining DIRBLKSIZ chunks with valid padding entries to prevent
-            // DIRECTORY CORRUPTED errors in fsck_ufs. FreeBSD's fsck validates that
-            // every DIRBLKSIZ chunk within di_size contains valid directory entries
-            // (d_reclen > 0). Zero-filled chunks have d_reclen == 0 which is invalid.
+            // Fill the remaining bytes in the initial fragment with valid padding
+            // entries. Only the first DIRBLKSIZ chunk is part of di_size for an
+            // empty filesystem, but keeping the fragment self-consistent makes the
+            // empty image resilient to direct raw-directory checks.
+            int dirBlkSizPad = Ufs2Constants.DirBlockSize;
+            long currentPos = ms.Position;
+            while (currentPos + dirBlkSizPad <= alignedSize)
+            {
+                var paddingEntry = new Ufs2DirectoryEntry
+                {
+                    Inode = 0,
+                    FileType = 0,
+                    NameLength = 0,
+                    Name = "",
+                    RecordLength = (ushort)dirBlkSizPad
+                };
+                paddingEntry.WriteTo(writer);
+                currentPos = ms.Position;
+            }
+
+            return data;
+        }
+
+        private byte[] SerializeSnapDirectoryBlock()
+        {
+            int alignedSize = AlignUpInt(FragmentSize, SectorSize);
+            byte[] data = new byte[alignedSize];
+
+            using var ms = new MemoryStream(data);
+            using var writer = new BinaryWriter(ms);
+
+            var dotEntry = new Ufs2DirectoryEntry
+            {
+                Inode = Ufs2Constants.RootInode + 1,
+                FileType = Ufs2Constants.DtDir,
+                NameLength = 1,
+                Name = ".",
+                RecordLength = Ufs2DirectoryEntry.CalculateRecordLength(1, FilesystemFormat == 2)
+            };
+            dotEntry.WriteTo(writer);
+
+            int remainingInChunk = Ufs2Constants.DirBlockSize - (int)(ms.Position % Ufs2Constants.DirBlockSize);
+            var dotDotEntry = new Ufs2DirectoryEntry
+            {
+                Inode = Ufs2Constants.RootInode,
+                FileType = Ufs2Constants.DtDir,
+                NameLength = 2,
+                Name = "..",
+                RecordLength = (ushort)remainingInChunk
+            };
+            dotDotEntry.WriteTo(writer);
+
             int dirBlkSizPad = Ufs2Constants.DirBlockSize;
             long currentPos = ms.Position;
             while (currentPos + dirBlkSizPad <= alignedSize)
@@ -1390,8 +1805,8 @@ namespace UFS2Tool
         }
 
         /// <summary>
-        /// Calculate directory sizes using FreeBSD 14.0.0 ffs_size_dir ADDSIZE/ADDDIRENT logic.
-        /// Uses fragment-level granularity for small files and exact indirect block accounting.
+        /// Calculate directory sizes using FreeBSD ffs_size_dir ADDSIZE/ADDDIRENT logic.
+        /// This matches the current population path, which allocates full blocks for file data.
         /// </summary>
         public static (long rawSize, long diskSize, long totalEntries) CalculateDirectorySizes(
             string directoryPath, int blockSize, int fragmentSize, int filesystemFormat)
@@ -1527,36 +1942,25 @@ namespace UFS2Tool
             if (!Directory.Exists(directoryPath))
                 throw new DirectoryNotFoundException($"Input directory not found: {directoryPath}");
 
-            // Soft updates: if not explicitly enabled, ensure journal is off
-            bool origSoftUpdates = SoftUpdates;
-            bool origSoftUpdatesJournal = SoftUpdatesJournal;
-            if (!SoftUpdates)
-                SoftUpdatesJournal = false;
-
-            try
-            {
             // Step 1: Calculate required space if not explicitly provided
             if (totalSizeBytes <= 0)
             {
-                var (dirSize, diskSize, totalEntries) = CalculateDirectorySizes(directoryPath, BlockSize);
+                var (dirSize, diskSize, totalEntries) = CalculateDirectorySizes(
+                    directoryPath, BlockSize, FragmentSize, FilesystemFormat);
                 totalSizeBytes = CalculateImageSize(diskSize);
 
                 // Ensure the image has enough cylinder groups for the required inodes.
-                // Each entry (file or directory) needs one inode, plus 3 reserved inodes
-                // (inode 0, inode 1, and the root directory inode 2).
-                long totalInodesNeeded = totalEntries + 3;
-                int inodesPerGroup = ComputeInodesPerGroup(totalSizeBytes);
-                int fragsPerBlock = BlockSize / FragmentSize;
-                int fragsPerGroup = inodesPerGroup * fragsPerBlock;
-                long totalFrags = totalSizeBytes / FragmentSize;
-                int numCylGroups = Math.Max(1, (int)((totalFrags + fragsPerGroup - 1) / fragsPerGroup));
-                long availableInodes = (long)numCylGroups * inodesPerGroup;
+                // Each entry (file or directory) needs one inode, plus reserved inodes
+                // (0, 1, root, and optionally .snap).
+                long totalInodesNeeded = totalEntries + ResolveInitialReservedInodes();
+                var layout = ResolveFilesystemLayout(totalSizeBytes);
+                long availableInodes = (long)layout.NumCylGroups * layout.InodesPerGroup;
 
                 if (totalInodesNeeded > availableInodes)
                 {
                     // Need more CGs to hold all inodes
-                    int requiredCgs = (int)((totalInodesNeeded + inodesPerGroup - 1) / inodesPerGroup);
-                    long requiredFrags = (long)requiredCgs * fragsPerGroup;
+                    int requiredCgs = (int)((totalInodesNeeded + layout.InodesPerGroup - 1) / layout.InodesPerGroup);
+                    long requiredFrags = (long)requiredCgs * layout.FragsPerGroup;
                     long requiredBytes = requiredFrags * FragmentSize;
                     if (requiredBytes > totalSizeBytes)
                         totalSizeBytes = AlignUp(requiredBytes, FragmentSize);
@@ -1578,13 +1982,6 @@ namespace UFS2Tool
             }
 
             return totalSizeBytes;
-            }
-            finally
-            {
-                // Restore original settings in case the creator instance is reused
-                SoftUpdates = origSoftUpdates;
-                SoftUpdatesJournal = origSoftUpdatesJournal;
-            }
         }
 
         /// <summary>
@@ -1613,9 +2010,11 @@ namespace UFS2Tool
             // Save original state for restoration after MakeFsImage completes
             int origBytesPerInode = BytesPerInode;
             int origBlocksPerCylGroup = BlocksPerCylGroup;
+            bool origMakeFsDefaultsActive = _makeFsDefaultsActive;
 
             try
             {
+            _makeFsDefaultsActive = true;
 
             // -s sets both minsize and maxsize (exactly like FreeBSD)
             if (imageSize > 0)
@@ -1634,9 +2033,9 @@ namespace UFS2Tool
 
             // ── Step 1: ffs_size_dir — walk tree, compute exact data size + inodes ──
             var (dirSize, diskSize, totalEntries) = CalculateDirectorySizes(directoryPath, BlockSize, FragmentSize, FilesystemFormat);
-            // Each entry needs one inode, plus 3 reserved inodes
-            // (inode 0, inode 1, and the root directory inode 2).
-            long totalInodes = totalEntries + 3;
+            // Each entry needs one inode, plus reserved inodes
+            // (0, 1, root, and optionally .snap).
+            long totalInodes = totalEntries + ResolveInitialReservedInodes();
             long totalSize = diskSize;
 
             // ── Step 2: Add requested free blocks/files slop ──
@@ -1648,100 +2047,94 @@ namespace UFS2Tool
                 totalSize = totalSize * (100 + freeblockpc) / 100;
 
             // ── Step 3: Add structural overhead (per-CG metadata + minfree) ──
-            // Compute CG layout offsets using the same formulas as WriteFilesystem.
-            // Each CG has dblkno fragments of metadata before data starts.
-            int inodeSize = InodeSizeForFormat;
             int fragsPerBlock = BlockSize / FragmentSize;
-            int inodesPerBlock = BlockSize / inodeSize;
-
-            int sblkno = AlignUpInt(
-                (Ufs2Constants.SuperblockOffset + Ufs2Constants.SuperblockSize + FragmentSize - 1) / FragmentSize,
-                fragsPerBlock);
-            int cblkno = sblkno + AlignUpInt(
-                (Ufs2Constants.SuperblockSize + FragmentSize - 1) / FragmentSize,
-                fragsPerBlock);
-            int iblkno = cblkno + fragsPerBlock;
-
-            // Estimate ipg (inodes per group) to predict the CG layout that
-            // WriteFilesystem will produce after step 7 sets BytesPerInode.
-            int ipg;
-            if (BytesPerInode > 0)
-            {
-                ipg = InodesPerGroup;
-            }
-            else if (totalInodes > 0)
-            {
-                // Auto-density: estimate what ComputeInodesPerGroup will compute.
-                int defaultFpg = InodesPerGroup * fragsPerBlock;
-                // Use 20% overhead estimate to approximate the final image size
-                // (minfree 8% + CG metadata ~2-5% + safety margin)
-                long estTotalSize = Math.Max(totalSize * 120 / 100, (long)BlockSize * 16);
-                long estTotalFrags = estTotalSize / FragmentSize;
-                int estNumCg = Math.Max(1, (int)((estTotalFrags + defaultFpg - 1) / defaultFpg));
-                ipg = (int)(totalInodes / estNumCg);
-                ipg = Math.Max(((ipg + inodesPerBlock - 1) / inodesPerBlock) * inodesPerBlock, inodesPerBlock);
-            }
-            else
-            {
-                ipg = InodesPerGroup;
-            }
-
-            int inodeblks = ((ipg + inodesPerBlock - 1) / inodesPerBlock) * fragsPerBlock;
-            int dblkno = iblkno + inodeblks;
+            bool autoDensity = false;
             bool autoMaxBpcg = false;
-            if (BlocksPerCylGroup <= 0)
+            int effectiveBytesPerInode = BytesPerInode;
+            int effectiveBlocksPerCylGroup = BlocksPerCylGroup;
+
+            FilesystemLayout ResolveLayoutForSize(long candidateSize, int densityValue, int blocksPerCgValue)
             {
-                // Auto maxbpcg: choose the largest blocks/group that still provides
-                // enough cylinder groups to fit all required inodes.
-                int requiredCgForInodes = 1;
-                if (totalInodes > 0 && ipg > 0)
-                    requiredCgForInodes = Math.Max(1, (int)((totalInodes + ipg - 1) / ipg));
-
-                long minSizeForCalc = Math.Max(totalSize, (long)BlockSize * 16);
-                long totalBlocksEstimate = Math.Max(1, (minSizeForCalc + BlockSize - 1) / BlockSize);
-                long autoBpcg = (totalBlocksEstimate + requiredCgForInodes - 1) / requiredCgForInodes;
-
-                long maxBpcgByInt = Math.Max(1, int.MaxValue / fragsPerBlock);
-                if (autoBpcg > maxBpcgByInt)
-                    autoBpcg = maxBpcgByInt;
-
-                BlocksPerCylGroup = (int)Math.Max(1, autoBpcg);
-                autoMaxBpcg = true;
+                int savedBytesPerInode = BytesPerInode;
+                int savedBlocksPerCylGroup = BlocksPerCylGroup;
+                try
+                {
+                    BytesPerInode = densityValue;
+                    BlocksPerCylGroup = blocksPerCgValue;
+                    return ResolveFilesystemLayout(candidateSize);
+                }
+                finally
+                {
+                    BytesPerInode = savedBytesPerInode;
+                    BlocksPerCylGroup = savedBlocksPerCylGroup;
+                }
             }
 
-            int fragsPerGroup = BlocksPerCylGroup * fragsPerBlock;
+            long totalSizeCandidate = Math.Max(totalSize, (long)BlockSize * 16);
+            for (int iteration = 0; iteration < 8; iteration++)
+            {
+                if (origBytesPerInode <= 0 && totalInodes > 0)
+                {
+                    effectiveBytesPerInode = (int)Math.Min(totalSizeCandidate / totalInodes + 1, int.MaxValue);
+                    autoDensity = true;
+                }
+                else
+                {
+                    effectiveBytesPerInode = origBytesPerInode;
+                }
 
-            // dataFragsPerCg: usable data fragments per CG (metadata consumes dblkno frags)
-            int dataFragsPerCg = fragsPerGroup - dblkno;
-            if (dataFragsPerCg < fragsPerBlock)
-                dataFragsPerCg = fragsPerBlock;
+                if (origBlocksPerCylGroup <= 0)
+                {
+                    var provisionalLayout = ResolveLayoutForSize(totalSizeCandidate, effectiveBytesPerInode, 0);
+                    int requiredCgForInodes = 1;
+                    if (totalInodes > 0 && provisionalLayout.InodesPerGroup > 0)
+                        requiredCgForInodes = Math.Max(1, (int)((totalInodes + provisionalLayout.InodesPerGroup - 1) / provisionalLayout.InodesPerGroup));
 
-            // Apply minfree: the reserved percentage reduces usable data capacity
-            long dataSize = totalSize;
-            if (MinFreePercent > 0)
-                dataSize = dataSize * (100 + MinFreePercent) / 100;
+                    long totalBlocksEstimate = Math.Max(1, (totalSizeCandidate + BlockSize - 1) / BlockSize);
+                    long autoBpcg = (totalBlocksEstimate + requiredCgForInodes - 1) / requiredCgForInodes;
+                    long maxBpcgByInt = Math.Max(1, int.MaxValue / fragsPerBlock);
+                    if (autoBpcg > maxBpcgByInt)
+                        autoBpcg = maxBpcgByInt;
 
-            // Compute total image size by scaling data with per-CG overhead ratio.
-            // Each CG of fragsPerGroup fragments has dataFragsPerCg usable data fragments,
-            // so the overhead ratio is fragsPerGroup / dataFragsPerCg.
-            long dataFragsNeeded = (dataSize + FragmentSize - 1) / FragmentSize;
+                    effectiveBlocksPerCylGroup = (int)Math.Max(1, autoBpcg);
+                    autoMaxBpcg = true;
+                }
+                else
+                {
+                    effectiveBlocksPerCylGroup = origBlocksPerCylGroup;
+                }
 
-            // Estimate number of CGs for CG summary area size calculation
-            int estNumCGs = Math.Max(1, (int)((dataFragsNeeded + dataFragsPerCg - 1) / dataFragsPerCg));
-            int csSize = AlignUpInt(estNumCGs * Ufs2Constants.CsumStructSize, FragmentSize);
+                var layout = ResolveLayoutForSize(totalSizeCandidate, effectiveBytesPerInode, effectiveBlocksPerCylGroup);
+                int dataFragsPerCg = layout.FragsPerGroup - layout.DblkNo;
+                if (dataFragsPerCg < fragsPerBlock)
+                    dataFragsPerCg = fragsPerBlock;
 
-            // Fixed overhead: primary superblock area + CG summary + root directory block
-            int sblockOffset = (FilesystemFormat == 1)
-                ? Ufs2Constants.SuperblockSize
-                : Ufs2Constants.SuperblockOffset;
-            long fixedOverhead = AlignUp(sblockOffset + Ufs2Constants.SuperblockSize, BlockSize)
-                               + csSize
-                               + BlockSize;
+                long dataSize = totalSize;
+                if (MinFreePercent > 0)
+                    dataSize = dataSize * (100 + MinFreePercent) / 100;
 
-            // Scale data by CG overhead ratio: ceil(dataFrags * fpg / dataFragsPerCg) gives
-            // the total fragments needed including per-CG metadata, converted to bytes.
-            totalSize = ((dataFragsNeeded * fragsPerGroup + dataFragsPerCg - 1) / dataFragsPerCg) * FragmentSize
-                      + fixedOverhead;
+                long dataFragsNeeded = (dataSize + FragmentSize - 1) / FragmentSize;
+                int sblockOffset = (FilesystemFormat == 1)
+                    ? Ufs2Constants.SuperblockSize
+                    : Ufs2Constants.SuperblockOffset;
+                long fixedOverhead = AlignUp(sblockOffset + Ufs2Constants.SuperblockSize, BlockSize)
+                                   + layout.CsSize
+                                   + (long)ResolveInitialDirectoryFragments() * FragmentSize;
+
+                long newTotalSize = ((dataFragsNeeded * layout.FragsPerGroup + dataFragsPerCg - 1) / dataFragsPerCg) * FragmentSize
+                                  + fixedOverhead;
+
+                if (newTotalSize == totalSizeCandidate)
+                    break;
+
+                totalSizeCandidate = newTotalSize;
+            }
+
+            totalSize = totalSizeCandidate;
+            if (autoDensity)
+                BytesPerInode = effectiveBytesPerInode;
+            if (autoMaxBpcg)
+                BlocksPerCylGroup = effectiveBlocksPerCylGroup;
 
             // ── Step 4: Enforce minimum size ──
             // The filesystem requires at least 16 blocks to fit superblock, CG, and inodes
@@ -1758,23 +2151,32 @@ namespace UFS2Tool
             if (roundup > 0)
                 totalSize = AlignUp(totalSize, roundup);
 
-            // ── Step 7: Auto-calculate density if not explicitly set ──
-            // FreeBSD: density = size / inodes + 1 (when -o density not specified)
-            bool autoDensity = false;
-            if (BytesPerInode <= 0 && totalInodes > 0)
-            {
+            if (autoDensity && totalInodes > 0)
                 BytesPerInode = (int)Math.Min(totalSize / totalInodes + 1, int.MaxValue);
-                autoDensity = true;
+
+            if (autoMaxBpcg)
+            {
+                var provisionalLayout = ResolveLayoutForSize(totalSize, BytesPerInode, 0);
+                int requiredCgForInodes = 1;
+                if (totalInodes > 0 && provisionalLayout.InodesPerGroup > 0)
+                    requiredCgForInodes = Math.Max(1, (int)((totalInodes + provisionalLayout.InodesPerGroup - 1) / provisionalLayout.InodesPerGroup));
+
+                long totalBlocksEstimate = Math.Max(1, (totalSize + BlockSize - 1) / BlockSize);
+                long autoBpcg = (totalBlocksEstimate + requiredCgForInodes - 1) / requiredCgForInodes;
+                long maxBpcgByInt = Math.Max(1, int.MaxValue / fragsPerBlock);
+                if (autoBpcg > maxBpcgByInt)
+                    autoBpcg = maxBpcgByInt;
+                BlocksPerCylGroup = (int)Math.Max(1, autoBpcg);
             }
 
-            // ── Step 8: Check maximum size ──
+            // ── Step 7: Check maximum size ──
             if (maximumSize > 0 && totalSize > maximumSize)
                 throw new ArgumentException(
                     $"Image size ({totalSize:N0} bytes) exceeds maximum size ({maximumSize:N0} bytes).");
 
             (Output ?? Console.Out).WriteLine($"  Calculated size of '{imagePath}': {totalSize:N0} bytes, {totalInodes} inodes");
 
-            // ── Step 9: Create image and populate ──
+            // ── Step 8: Create image and populate ──
             (Output ?? Console.Out).WriteLine($"  Input directory: {directoryPath}");
             (Output ?? Console.Out).WriteLine($"  Directory size:  {dirSize:N0} bytes ({dirSize / (1024.0 * 1024):F2} MB)");
             (Output ?? Console.Out).WriteLine($"  Image size:      {totalSize:N0} bytes ({totalSize / (1024 * 1024)} MB)");
@@ -1798,6 +2200,7 @@ namespace UFS2Tool
             finally
             {
                 // Restore original state in case the creator instance is reused
+                _makeFsDefaultsActive = origMakeFsDefaultsActive;
                 BytesPerInode = origBytesPerInode;
                 BlocksPerCylGroup = origBlocksPerCylGroup;
             }
@@ -1831,8 +2234,8 @@ namespace UFS2Tool
             int dataStartFrag = sb.DblkNo;
 
             // Track allocation state
-            // Next available inode (0,1 reserved, 2 = root)
-            uint nextInode = 3;
+            // Next available inode (0,1 reserved, 2 = root, 3 = .snap when enabled)
+            uint nextInode = (uint)ResolveInitialReservedInodes();
             // Track per-CG data block allocation (fragment index within CG, starting from data region)
             int currentCg = 0;
             int fragsPerGroup = sb.CylGroupSize;
@@ -1840,7 +2243,7 @@ namespace UFS2Tool
             // CG summary occupies csFrags fragments (fragment-aligned), but the root dir
             // starts at the next block boundary (csFragsBlk = block-aligned CG summary).
             int csFragsBlkInCg0 = ((sb.CsSize + sb.BSize - 1) / sb.BSize) * fragsPerBlock;
-            int nextDataFragInCg = dataStartFrag + csFragsBlkInCg0 + fragsPerBlock;
+            int nextDataFragInCg = dataStartFrag + csFragsBlkInCg0 + ResolveInitialDirectoryFragments();
             // Track per-CG high-water mark of data allocation (fragment offset within CG)
             // so PatchCgAndSuperblock knows exactly how many frags were used in each CG.
             var perCgHighWater = new int[sb.NumCylGroups];
@@ -1854,7 +2257,7 @@ namespace UFS2Tool
             int filesWritten = 0;
             // Track per-CG directory counts (root is in CG 0)
             var dirsPerCg = new int[sb.NumCylGroups];
-            dirsPerCg[Ufs2Constants.RootInode / sb.InodesPerGroup] = 1; // root directory
+            dirsPerCg[Ufs2Constants.RootInode / sb.InodesPerGroup] = ResolveInitialDirectoryInodes();
 
             long totalFrags = sb.TotalBlocks;
 
@@ -1908,6 +2311,9 @@ namespace UFS2Tool
 
             if (totalFiles > 0 || totalBytes > 0)
                 ReportCopyProgress(0, 0, force: true);
+
+            if (!ResolveNoSnapDir())
+                rootEntries.Add((".snap", (uint)(Ufs2Constants.RootInode + 1), Ufs2Constants.DtDir));
 
             // Recursively process directory contents
             ProcessDirectoryContents(fs, writer, reader, directoryPath,
@@ -3002,7 +3408,7 @@ namespace UFS2Tool
             int numCylGroups = sb.NumCylGroups;
 
             int totalFreeInodes = 0;
-            int totalDirs = 1 + newDirCount; // root + new directories
+            int totalDirs = ResolveInitialDirectoryInodes() + newDirCount;
             long totalFreeBlocks = 0;
             long totalFreeFragRem = 0;
 

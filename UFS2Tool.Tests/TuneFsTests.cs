@@ -54,7 +54,6 @@ namespace UFS2Tool.Tests
         {
             using (var image = new Ufs2Image(_imagePath, readOnly: false))
             {
-                Assert.Equal(0, image.Superblock.Flags & Ufs2Constants.FsDosoftdep);
                 image.Superblock.Flags |= Ufs2Constants.FsDosoftdep;
                 image.WriteSuperblock();
             }

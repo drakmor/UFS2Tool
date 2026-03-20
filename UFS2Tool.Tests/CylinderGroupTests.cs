@@ -322,14 +322,10 @@ namespace UFS2Tool.Tests
         [Fact]
         public void CylinderGroup_ClusterFieldsCorrect_UnevenLastCG()
         {
-            // Choose a size that doesn't divide evenly by fragsPerGroup,
-            // ensuring the last CG is smaller than the others.
             var creator = new Ufs2ImageCreator();
-            int fragsPerBlock = creator.BlockSize / creator.FragmentSize;
-            int fragsPerGroup = Ufs2Constants.DefaultInodesPerGroup * fragsPerBlock;
-            // Use 2.5 CGs worth of fragments to ensure last CG is smaller
-            long totalFrags = (long)fragsPerGroup * 2 + fragsPerGroup / 2;
-            long imageSize = totalFrags * creator.FragmentSize;
+            // Use a size that is deliberately awkward for the auto-computed fs_fpg
+            // so the final cylinder group is not equal to the nominal full-sized CG.
+            long imageSize = 160L * 1024 * 1024 + creator.FragmentSize;
 
             creator.CreateImage(_imagePath, imageSize);
 
