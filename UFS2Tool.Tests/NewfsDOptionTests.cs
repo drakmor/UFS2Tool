@@ -1132,6 +1132,19 @@ namespace UFS2Tool.Tests
         }
 
         [Fact]
+        public void MakeFsImage_MaxContigUsesMakeFsDefaultLimit()
+        {
+            File.WriteAllText(Path.Combine(_testDir, "test.txt"), "data");
+
+            var creator = new Ufs2ImageCreator();
+            creator.MakeFsImage(_imagePath, _testDir);
+
+            using var image = new Ufs2Image(_imagePath, readOnly: true);
+            int expectedMaxContig = Math.Max(1, Math.Min(128 * 1024, Ufs2ImageCreator.MaxBlockSize) / image.Superblock.BSize);
+            Assert.Equal(expectedMaxContig, image.Superblock.MaxContig);
+        }
+
+        [Fact]
         public void MakeFsImage_DefaultRootDoesNotContainSnapDirectory()
         {
             File.WriteAllText(Path.Combine(_testDir, "test.txt"), "data");

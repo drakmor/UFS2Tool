@@ -387,7 +387,10 @@ namespace UFS2Tool
 
         private int ResolveMaxContig(int maxBSize)
         {
-            int resolved = MaxContig > 0 ? MaxContig : Math.Max(1, DefaultMaxPhys / BlockSize);
+            int defaultMaxTransfer = _makeFsDefaultsActive
+                ? Math.Min(DefaultMaxPhys, MaxBlockSize)
+                : DefaultMaxPhys;
+            int resolved = MaxContig > 0 ? MaxContig : Math.Max(1, defaultMaxTransfer / BlockSize);
             int minForExtent = Math.Max(1, maxBSize / BlockSize);
             return Math.Max(resolved, minForExtent);
         }
