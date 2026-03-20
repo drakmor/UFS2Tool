@@ -13,6 +13,27 @@ namespace UFS2Tool.GUI.ViewModels;
 public partial class CreateFilesystemViewModel : ViewModelBase
 {
     private readonly ObservableCollection<string> _outputLog;
+    private bool _softUpdatesTouched;
+    private bool _optimizationTouched;
+    private bool _suppressTouchTracking;
+
+    private string GetEffectiveOptimizationPreference()
+    {
+        if (_optimizationTouched && !string.IsNullOrWhiteSpace(OptimizationPreference))
+            return OptimizationPreference;
+
+        return string.IsNullOrWhiteSpace(InputDirectory)
+            ? (MinFreePercent < 8 ? "space" : "time")
+            : "time";
+    }
+
+    private bool GetEffectiveSoftUpdates()
+    {
+        if (_softUpdatesTouched)
+            return SoftUpdates;
+
+        return string.IsNullOrWhiteSpace(InputDirectory) && FilesystemFormat > 1;
+    }
 
     [ObservableProperty]
     private string _imagePath = "";
@@ -32,6 +53,12 @@ public partial class CreateFilesystemViewModel : ViewModelBase
     partial void OnFilesystemFormatChanged(int value)
     {
         OnPropertyChanged(nameof(FilesystemFormatIndex));
+        if (!_softUpdatesTouched)
+        {
+            _suppressTouchTracking = true;
+            SoftUpdates = string.IsNullOrWhiteSpace(InputDirectory) && value > 1;
+            _suppressTouchTracking = false;
+        }
     }
 
     [ObservableProperty]
@@ -65,7 +92,7 @@ public partial class CreateFilesystemViewModel : ViewModelBase
     private string _inputDirectory = "";
 
     [ObservableProperty]
-    private bool _softUpdates;
+    private bool _softUpdates = true;
 
     [ObservableProperty]
     private bool _softUpdatesJournal;
@@ -87,6 +114,51 @@ public partial class CreateFilesystemViewModel : ViewModelBase
         _outputLog = outputLog;
     }
 
+    partial void OnSoftUpdatesChanged(bool value)
+    {
+        if (!_suppressTouchTracking)
+            _softUpdatesTouched = true;
+    }
+
+    partial void OnOptimizationPreferenceChanged(string value)
+    {
+        if (!_suppressTouchTracking)
+            _optimizationTouched = true;
+    }
+
+    partial void OnMinFreePercentChanged(int value)
+    {
+        if (!_optimizationTouched)
+        {
+            _suppressTouchTracking = true;
+            OptimizationPreference = string.IsNullOrWhiteSpace(InputDirectory)
+                ? (value < 8 ? "space" : "time")
+                : "time";
+            _suppressTouchTracking = false;
+        }
+    }
+
+    partial void OnInputDirectoryChanged(string value)
+    {
+        bool useMakeFs = !string.IsNullOrWhiteSpace(value);
+
+        if (!_softUpdatesTouched)
+        {
+            _suppressTouchTracking = true;
+            SoftUpdates = !useMakeFs && FilesystemFormat > 1;
+            _suppressTouchTracking = false;
+        }
+
+        if (!_optimizationTouched)
+        {
+            _suppressTouchTracking = true;
+            OptimizationPreference = useMakeFs
+                ? "time"
+                : (MinFreePercent < 8 ? "space" : "time");
+            _suppressTouchTracking = false;
+        }
+    }
+
     [RelayCommand]
     private async Task CreateFilesystemAsync()
     {
@@ -103,9 +175,11 @@ public partial class CreateFilesystemViewModel : ViewModelBase
         }
 
         IsRunning = true;
+        string effectiveOptimization = GetEffectiveOptimizationPreference();
+        bool effectiveSoftUpdates = GetEffectiveSoftUpdates();
         _outputLog.Add($"[NewFS] Creating UFS{FilesystemFormat} filesystem: {ImagePath}");
         _outputLog.Add($"[NewFS] Parameters: BlockSize={BlockSize}, FragSize={FragmentSize}, SectorSize={SectorSize}");
-        _outputLog.Add($"[NewFS] Options: MinFree={MinFreePercent}%, Optimization={OptimizationPreference ?? "time"}, SoftUpdates={SoftUpdates}, Journal={SoftUpdatesJournal}, TRIM={TrimEnabled}");
+        _outputLog.Add($"[NewFS] Options: MinFree={MinFreePercent}%, Optimization={effectiveOptimization}, SoftUpdates={effectiveSoftUpdates}, Journal={SoftUpdatesJournal}, TRIM={TrimEnabled}");
         if (!string.IsNullOrWhiteSpace(VolumeName))
             _outputLog.Add($"[NewFS] Volume name: {VolumeName}");
         if (!string.IsNullOrWhiteSpace(InputDirectory))
@@ -130,10 +204,8 @@ public partial class CreateFilesystemViewModel : ViewModelBase
                     SectorSize = SectorSize,
                     VolumeName = VolumeName ?? "",
                     MinFreePercent = MinFreePercent,
-                    OptimizationPreference = OptimizationPreference ?? "time",
                     BytesPerInode = BytesPerInode,
                     MaxContig = MaxContig,
-                    SoftUpdates = SoftUpdates,
                     SoftUpdatesJournal = SoftUpdatesJournal,
                     TrimEnabled = TrimEnabled,
                     EraseContents = EraseContents,
@@ -141,6 +213,11 @@ public partial class CreateFilesystemViewModel : ViewModelBase
                     Output = logWriter,
                     ErrorOutput = logWriter,
                 };
+
+                if (_optimizationTouched && !string.IsNullOrWhiteSpace(OptimizationPreference))
+                    creator.OptimizationPreference = OptimizationPreference;
+                if (_softUpdatesTouched)
+                    creator.SoftUpdates = SoftUpdates;
 
                 if (!string.IsNullOrWhiteSpace(InputDirectory))
                 {
